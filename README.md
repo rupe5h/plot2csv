@@ -1,9 +1,27 @@
 # plot2csv — plot digitizer
 
-Extract numerical data from images of plots, in the spirit of WebPlotDigitizer,
-with an automatic pipeline that you review and correct at every step. Written in
-Rust with egui; ships as **one self-contained HTML file** that works offline
-(open it straight from disk). Nothing is uploaded anywhere.
+Extract numerical data from images of plots, in the spirit of
+[WebPlotDigitizer](https://github.com/automeris-io/WebPlotDigitizer), with an
+automatic pipeline that you review and correct at every step. Written in Rust
+with egui.
+
+## Works fully offline
+
+plot2csv is **one self-contained HTML file** (`plot2csv.html`). It needs no
+server, no install and no network connection:
+
+- **Open it straight from disk.** Double-click the file, or open it from a USB
+  stick or a shared folder; it runs from `file://` in any modern browser.
+- **Everything is inside the file.** The app, the OCR engine (onnxruntime-web)
+  and the OCR models, the fonts and the icons are all embedded. The page fetches
+  nothing from the network, not even at start-up.
+- **Your images never leave your machine.** Correction, OCR, calibration and
+  extraction all run locally in the browser. Nothing is uploaded anywhere.
+- **Keep a copy.** If you opened plot2csv from a web page, **Help → Download for
+  Offline Use** saves it as `plot2csv.html` so you can use it later with no
+  connection at all.
+
+This makes it suitable for air-gapped machines and for confidential figures.
 
 ## Pipeline
 
@@ -27,8 +45,6 @@ and automatic re-runs; loading an image or project starts a new history.
 Plot types: 2D X-Y (linear, log, dates), bar charts, polar, ternary, map with scale
 bar, and image (pixels). The **Analyze** menu measures distances and angles.
 Projects save and load as JSON (File menu), with the image embedded.
-**Help → Download for Offline Use** saves the page as `plot2csv.html` to open
-later without a network connection.
 
 ## Building
 

@@ -200,9 +200,13 @@ impl Plot2CsvApp {
                 let (open, close) = modal(ctx, "about", "About plot2csv", 420.0, |ui| {
                     ui.label(RichText::new("plot2csv — plot digitizer").heading());
                     ui.label("Extract numerical data from images of plots, in the spirit of WebPlotDigitizer, with an automatic pipeline you review at every step: rotation/perspective correction, plot-area detection, OCR of labels, axis calibration and series extraction.");
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("WebPlotDigitizer:");
+                        ui.hyperlink_to("github.com/automeris-io/WebPlotDigitizer", "https://github.com/automeris-io/WebPlotDigitizer");
+                    });
                     ui.add_space(4.0);
                     ui.label("OCR: indra-ocr models (Datalab) on onnxruntime-web.");
-                    ui.label("Runs entirely in your browser; nothing is uploaded.");
+                    ui.label("Works fully offline: everything runs in your browser, and nothing is fetched or uploaded.");
                     ui.add_space(4.0);
                     ui.label("plot2csv is licensed under the GNU AGPL v3 or later. The bundled OCR models are under a different, more restrictive licence: see Help → Licences.");
                     ui.button("Close").clicked()

@@ -39,6 +39,22 @@ pub fn save_file(name: &str, bytes: Vec<u8>) {
     }
 }
 
+/// The page can save a copy of itself (see `wpSaveOffline` in index.template.html).
+pub fn offline_copy_available() -> bool {
+    Reflect::get(&js_sys::global(), &"wpSaveOffline".into()).is_ok_and(|f| f.is_function())
+}
+
+/// Download the self-contained HTML page, as it was loaded, so it can be
+/// opened later without a network connection. Returns its size in bytes.
+pub fn save_offline_copy(name: &str) -> Result<usize, String> {
+    let f: js_sys::Function = Reflect::get(&js_sys::global(), &"wpSaveOffline".into())
+        .ok()
+        .and_then(|f| f.dyn_into().ok())
+        .ok_or("this page cannot save an offline copy")?;
+    let size = f.call1(&JsValue::NULL, &name.into()).map_err(|e| format!("{e:?}"))?;
+    Ok(size.as_f64().unwrap_or(0.0) as usize)
+}
+
 /// Images pasted with Ctrl+V are queued by the page script in `globalThis.wpPasted`.
 pub fn take_pasted_image() -> Option<Vec<u8>> {
     let g = js_sys::global();
@@ -50,6 +66,22 @@ pub fn take_pasted_image() -> Option<Vec<u8>> {
     let v = q.shift();
     let arr: Uint8Array = v.dyn_into().ok()?;
     Some(arr.to_vec())
+}
+
+fn session_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.session_storage().ok()?
+}
+
+/// Read a value from the tab's `sessionStorage` (None if unavailable, e.g. blocked).
+pub fn session_get(key: &str) -> Option<String> {
+    session_storage()?.get_item(key).ok()?
+}
+
+/// Write a value to the tab's `sessionStorage`; failures are ignored.
+pub fn session_set(key: &str, value: &str) {
+    if let Some(s) = session_storage() {
+        let _ = s.set_item(key, value);
+    }
 }
 
 fn wp_ort() -> Option<JsValue> {

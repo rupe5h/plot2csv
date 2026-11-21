@@ -21,10 +21,27 @@ pub fn save_file(name: &str, bytes: Vec<u8>) {
     }
 }
 
+/// Only the browser build is a single page that can save a copy of itself.
+pub fn offline_copy_available() -> bool {
+    false
+}
+
+pub fn save_offline_copy(_name: &str) -> Result<usize, String> {
+    Err("offline copies are only available in the browser build".into())
+}
+
 /// Images pasted from the clipboard are delivered through egui on native.
 pub fn take_pasted_image() -> Option<Vec<u8>> {
     None
 }
+
+/// A native session lasts as long as the process, and the app keeps its own
+/// state in memory for that long, so there is nothing to store here.
+pub fn session_get(_key: &str) -> Option<String> {
+    None
+}
+
+pub fn session_set(_key: &str, _value: &str) {}
 
 pub fn ocr_available() -> bool {
     cfg!(feature = "native-ocr")

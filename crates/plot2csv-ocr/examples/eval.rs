@@ -111,6 +111,10 @@ fn main() -> anyhow::Result<()> {
                 kind = plot2csv_core::AxesKind::Bar;
             }
             let panel = Panel { id: pi as u32 + 1, name: format!("p{pi}"), kind, inner: pg.inner, outer: pg.outer, enabled: true };
+            if verbose {
+                let (i, o) = (&panel.inner, &panel.outer);
+                println!("   panel {pi} inner=({:.0},{:.0},{:.0},{:.0}) outer=({:.0},{:.0},{:.0},{:.0})", i.x0, i.y0, i.x1, i.y1, o.x0, o.y0, o.x1, o.y1);
+            }
             let mut collected = Vec::new();
             for cr in panel_crops(&cgray, &panel) {
                 let lines = block_on(ocr_page(&be, &cfg, &cr.img))?;
@@ -181,6 +185,12 @@ fn main() -> anyhow::Result<()> {
                 ov.save(Path::new(d).join(format!("{name}_p{pi}.png")))?;
             }
             let (tx, ty) = (axis(&tp["x"]), axis(&tp["y"]).unwrap());
+            // Extra series are junk: grid fragments, edge shades, split curves.
+            let n_truth = tp["series"].as_array().map(|a| a.len()).unwrap_or(0);
+            if res.datasets.len() != n_truth {
+                println!("   ✗ expected {n_truth} series, found {}", res.datasets.len());
+                all_ok = false;
+            }
             for ts in tp["series"].as_array().unwrap() {
                 let tname = ts["name"].as_str().unwrap_or("?");
                 let tkind = ts["kind"].as_str().unwrap_or("line");
@@ -237,13 +247,17 @@ fn main() -> anyhow::Result<()> {
                 }
                 match best {
                     Some((err, cov, dname, n)) => {
-                        let ok = err < 0.01 && cov > 0.8;
+                        // Names read from the legend, when the fixture has one.
+                        let legend = ts["legend"].as_str();
+                        let named = legend.map(|l| l == dname).unwrap_or(true);
+                        let ok = err < 0.01 && cov > 0.8 && named;
                         all_ok &= ok;
                         println!(
-                            "   {} {tname:<8} ← {dname:<22} n={n:<4} median err {:.3}%  coverage {:.0}%",
+                            "   {} {tname:<8} ← {dname:<22} n={n:<4} median err {:.3}%  coverage {:.0}%{}",
                             if ok { "✓" } else { "✗" },
                             err * 100.0,
-                            cov * 100.0
+                            cov * 100.0,
+                            if named { String::new() } else { format!("  (legend says {:?})", legend.unwrap_or_default()) }
                         );
                     }
                     None => {

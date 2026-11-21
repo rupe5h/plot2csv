@@ -94,8 +94,16 @@ pub fn detect_panels(src: &GrayImage) -> RegionResult {
     }
     // Largest first; drop candidates overlapping an accepted one. A candidate
     // that contains two or more disjoint large candidates is a figure border.
+    // So is one around a single large candidate inset on all four sides (an
+    // Excel chart-area border, a figure frame): its margin holds the tick
+    // labels. Grid-line strips of a real frame share its sides, so they don't
+    // count, and insets and legend boxes are too small.
     cands.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
     let contains = |a: &RectF, b: &RectF| b.intersect(a).map(|r| r.area() / b.area().max(1e-9)).unwrap_or(0.0) > 0.9;
+    let min_inset = (0.008 * w.max(h)).max(4.0);
+    let inset_in = |outer: &RectF, d: &RectF| {
+        [d.x0 - outer.x0, d.y0 - outer.y0, outer.x1 - d.x1, outer.y1 - d.y1].iter().all(|m| *m > min_inset)
+    };
     let mut accepted: Vec<PanelGuess> = Vec::new();
     for (i, c) in cands.iter().enumerate() {
         let inside: Vec<&PanelGuess> =
@@ -107,6 +115,9 @@ pub fn detect_panels(src: &GrayImage) -> RegionResult {
             }
         }
         if disjoint >= 2 {
+            continue;
+        }
+        if inside.iter().any(|d| d.inner.area() > 0.35 * c.inner.area() && inset_in(&c.inner, &d.inner)) {
             continue;
         }
         let overlaps = accepted.iter().any(|a| {
@@ -290,6 +301,32 @@ mod tests {
         let p = &r.panels[0];
         assert!((p.inner.x0 - 80.0).abs() < 3.0 && (p.inner.y1 - 330.0).abs() < 3.0, "{:?}", p.inner);
         assert!(p.outer.x0 < 60.0 && p.outer.y1 > 340.0, "{:?}", p.outer);
+    }
+
+    #[test]
+    fn chart_area_border_is_not_the_plot() {
+        // Excel-style: grey border at the image edge around a framed plot with
+        // horizontal grid lines (which form strip "frames" sharing its sides).
+        let mut g = GrayImage::from_pixel(700, 480, Luma([255]));
+        for x in 0..700 {
+            g.put_pixel(x, 0, Luma([134]));
+            g.put_pixel(x, 479, Luma([134]));
+        }
+        for y in 0..480 {
+            g.put_pixel(0, y, Luma([134]));
+            g.put_pixel(699, y, Luma([134]));
+        }
+        draw_axes(&mut g, 90, 15, 680, 420, true);
+        for gy in [116, 218, 320] {
+            for x in 90..=680 {
+                g.put_pixel(x, gy, Luma([140]));
+            }
+        }
+        let r = detect_panels(&g);
+        assert_eq!(r.panels.len(), 1, "{}", r.note);
+        let p = &r.panels[0];
+        assert!((p.inner.x0 - 90.0).abs() < 4.0 && (p.inner.y0 - 15.0).abs() < 4.0, "{:?}", p.inner);
+        assert!((p.inner.x1 - 680.0).abs() < 4.0 && (p.inner.y1 - 420.0).abs() < 4.0, "{:?}", p.inner);
     }
 
     #[test]

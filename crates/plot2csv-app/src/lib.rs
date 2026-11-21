@@ -2,9 +2,11 @@ pub mod app;
 pub mod canvas;
 pub mod dialogs;
 pub mod images;
+pub mod log_axis;
 pub mod measure;
 pub mod platform;
 pub mod stages;
+pub mod tips;
 pub mod widgets;
 
 pub use app::Plot2CsvApp;

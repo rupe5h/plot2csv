@@ -174,4 +174,64 @@ for y in range(BH):
 photo = photo.filter(ImageFilter.GaussianBlur(0.8))
 photo.save(os.path.join(OUT, "photo_sine.jpg"), quality=85)
 json.dump({"panels": [panel]}, open(os.path.join(OUT, "photo_sine.json"), "w"), indent=1)
+
+# 7. spectrum_grid: spreadsheet-style response spectra. Log X with minor grid
+# lines (semi-transparent, so they darken where they cross), a title and a
+# legend in white boxes inside the frame, two-line legend entries, thick
+# dashed model curves and spiky solid curves that cross. Drawn at 2x and
+# downsampled, which anti-aliases and leaves resampling fringes.
+S = 2
+im = Image.new("RGB", (850 * S, 520 * S), "white")
+ax = Axes(ImageDraw.Draw(im), (73 * S, 13 * S, 812 * S, 479 * S), (0.01, 10), (0, 0.6), xlog=True)
+vgrid = Image.new("RGBA", im.size, (0, 0, 0, 0)); hgrid = Image.new("RGBA", im.size, (0, 0, 0, 0))
+dv, dh = ImageDraw.Draw(vgrid), ImageDraw.Draw(hgrid)
+for e in (0.01, 0.1, 1):
+    for k in range(1, 10):
+        x = ax.tx(e * k); dv.line([x, ax.T, x, ax.B], fill=(0, 0, 0, 64), width=S)
+for k in range(31):
+    y = ax.ty(k * 0.02); dh.line([ax.L, y, ax.R, y], fill=(0, 0, 0, 64), width=S)
+im = Image.alpha_composite(Image.alpha_composite(im.convert("RGBA"), vgrid), hgrid).convert("RGB")
+d = ImageDraw.Draw(im); ax.d = d
+FB, FL = font(16 * S), font(13 * S)
+d.rectangle([ax.L, ax.T, ax.R, ax.B], outline="black", width=S)
+for v, s in ((0.01, "0.01"), (0.1, "0.1"), (1, "1"), (10, "10")):
+    w = d.textlength(s, font=FB); d.text((ax.tx(v) - w / 2, ax.B + 10 * S), s, fill="black", font=FB)
+for k in range(7):
+    s = "0" if k == 0 else f"0.{k}"; w = d.textlength(s, font=FB); d.text((ax.L - 8 * S - w, ax.ty(k / 10) - 9 * S), s, fill="black", font=FB)
+d.text((390 * S, 494 * S), "Period (sec)", fill="black", font=FB)
+def spectrum(a, b, u0, s1, s2, tail, extra=lambda u: 0.0):
+    def f(x):
+        u = math.log10(x)
+        y = a + (b - a) * math.exp(-((u - u0) / s1) ** 2) if u <= u0 else tail + (b - tail) * math.exp(-((u - u0) / s2) ** 2)
+        return y + extra(u)
+    return [[10 ** (-2 + 3 * i / 600), f(10 ** (-2 + 3 * i / 600))] for i in range(601)]
+spike = lambda u, c, w, h: h * math.exp(-((u - c) / w) ** 2)
+curves = [  # legend order = drawing order; (lines, colour, dash, points)
+    (["Model A (2008)", "Vs30=760m/s"], (112, 48, 160), (22, 12), spectrum(0.12, 0.265, -0.8, 0.45, 0.55, 0.02)),
+    (["Model A (2008)", "Vs30=284m/s"], (255, 0, 0), (22, 12), spectrum(0.155, 0.345, -0.65, 0.45, 0.6, 0.05)),
+    (["Model B (2013)", "Vs30=284m/s"], (15, 36, 62), (22, 12), spectrum(0.19, 0.53, -0.6, 0.55, 0.7, 0.08)),
+    (["Site profile 1"], (150, 54, 52), None, spectrum(0.107, 0.245, -0.78, 0.45, 0.5, 0.005, lambda u: 0.004 * math.sin(60 * u))),
+    (["Site profile 2"], (134, 166, 74), None, spectrum(0.117, 0.235, -0.65, 0.45, 0.5, 0.035, lambda u: spike(u, -0.4, 0.05, 0.09) + 0.006 * math.sin(50 * u))),
+    (["Site profile 3"], (60, 150, 175), None, spectrum(0.137, 0.27, -0.6, 0.4, 0.42, 0.065, lambda u: spike(u, -0.84, 0.035, 0.12) + spike(u, -0.37, 0.04, 0.15))),
+    (["Artificial motions -", "profile 3"], (220, 130, 54), None, spectrum(0.16, 0.30, -0.6, 0.4, 0.45, 0.095, lambda u: spike(u, -0.83, 0.04, 0.11) + spike(u, -0.36, 0.05, 0.16) + 0.01 * math.sin(40 * u))),
+]
+for _, col, dash, pts in curves:
+    ax.line(pts, col, width=4 * S, dash=dash and (dash[0] * S, dash[1] * S))
+d.rectangle([150 * S, 15 * S, 600 * S, 50 * S], fill="white")
+d.text((160 * S, 20 * S), "Response Spectrum - Site Class C", fill="black", font=font(20 * S))
+LX, LY = 612, 56
+d.rectangle([LX * S, LY * S, 808 * S, (LY + 6 + sum(18 * len(c[0]) + 6 for c in curves)) * S], fill="white")
+y = LY + 6
+for lines, col, dash, _ in curves:
+    d.line([(LX + 6) * S, (y + 8) * S, (LX + 40) * S, (y + 8) * S], fill=col, width=4 * S) if not dash else [
+        d.line([(LX + 6 + k) * S, (y + 8) * S, (LX + 6 + k + 9) * S, (y + 8) * S], fill=col, width=4 * S) for k in (0, 13, 26)]
+    for line in lines:
+        d.text(((LX + 48) * S, y * S), line, fill="black", font=FL); y += 18
+    y += 6
+im = im.resize((850, 520), Image.LANCZOS)
+im.save(os.path.join(OUT, "spectrum_grid.png"))
+json.dump({"panels": [{"x": {"min": 0.01, "max": 10, "log": True}, "y": {"min": 0, "max": 0.6, "log": False},
+     "series": [{"name": f"s{i}", "legend": " ".join(l.rstrip(" -") for l in lines), "kind": "line", "points": pts}
+                for i, (lines, _, _, pts) in enumerate(curves)]}]},
+    open(os.path.join(OUT, "spectrum_grid.json"), "w"), indent=1)
 print("fixtures written to", OUT)

@@ -359,7 +359,7 @@ impl Plot2CsvApp {
 /// Faint calibrated grid: lines at nice data values across the panel.
 fn draw_cal_grid(painter: &egui::Painter, view: &CanvasView, cal: &Calibration, inner: &plot2csv_core::geom::RectF) {
     let col = Stroke::new(1.0, Color32::from_rgba_unmultiplied(200, 0, 200, 110));
-    let font = egui::FontId::proportional(11.0);
+    let font = egui::FontId::proportional(13.0);
     let tcol = Color32::from_rgb(170, 0, 170);
     match cal {
         Calibration::Xy(_) => {

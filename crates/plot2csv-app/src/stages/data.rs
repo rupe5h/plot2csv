@@ -223,8 +223,53 @@ impl Plot2CsvApp {
         let (w, h) = (img.width() as usize, img.height() as usize);
         let mask_bits = ds.auto.mask.as_ref().filter(|m| m.width as usize == w && m.height as usize == h).map(|m| m.to_bits());
         let region = if mask_bits.is_some() { None } else { inner.map(|r| RectF::new(r.x0 + 3.0, r.y0 + 3.0, r.x1 - 3.0, r.y1 - 3.0)) };
-        let bits = plot2csv_vision::color::filter_colors(&img, &ds.auto, mask_bits.as_deref(), region);
+        let palette = self.palette();
+        let bits = plot2csv_vision::color::filter_colors_among(&img, &ds.auto, mask_bits.as_deref(), region, &palette);
         Some((bits, w, h))
+    }
+
+    /// The plot area's colours (grid, series, text): the colour test's rivals.
+    fn palette(&mut self) -> Vec<[u8; 3]> {
+        self.dominant_colors().iter().map(|c| c.color).collect()
+    }
+
+    /// The pen looks at colour: when the active dataset's colour is not what a
+    /// stroke covers (a new dataset, or a stroke over another curve), its
+    /// foreground colour becomes the series colour under the stroke.
+    fn pick_color_under_stroke(&mut self, stroke: &[Pos2], r: f32) {
+        let Some(img) = self.imgs.corrected.clone() else { return };
+        let Some(ds) = self.datasets().get(self.active_ds_index()).cloned() else { return };
+        if ds.auto.color_mode != ColorMode::Foreground {
+            return;
+        }
+        let (w, h) = (img.width() as usize, img.height() as usize);
+        let mut painted = vec![false; w * h];
+        paint_stroke(&mut painted, w, h, stroke, r, true);
+        let bl = plot2csv_vision::color::to_lab(ds.auto.bg);
+        let raw = img.as_raw();
+        let ink = painted
+            .iter()
+            .enumerate()
+            .filter(|(i, p)| **p && plot2csv_vision::color::lab_dist(plot2csv_vision::color::to_lab([raw[4 * i], raw[4 * i + 1], raw[4 * i + 2]]), bl) > 22.0)
+            .count();
+        if ink == 0 {
+            return;
+        }
+        let palette = self.palette();
+        let hit = plot2csv_vision::color::filter_colors_among(&img, &ds.auto, Some(&painted), None, &palette).iter().filter(|b| **b).count();
+        if hit as f64 >= 0.25 * ink as f64 {
+            return;
+        }
+        let Some(c) = plot2csv_vision::color::stroke_color(&img, &painted, ds.auto.bg) else { return };
+        if c == ds.auto.fg {
+            return;
+        }
+        if let Some(d) = self.active_ds_mut() {
+            d.auto.fg = c;
+            d.color = c;
+        }
+        self.data_ui.filter_tex = None;
+        self.status = format!("Pen: foreground colour set to RGB ({}, {}, {}), the curve under the stroke.", c[0], c[1], c[2]);
     }
 
     fn run_extraction(&mut self) {
@@ -297,7 +342,8 @@ impl Plot2CsvApp {
         let id = self.project.active_panel.unwrap_or(0);
         if self.data_ui.dominant.as_ref().map(|d| d.0 != id).unwrap_or(true) {
             let cols = match &self.imgs.corrected {
-                Some(img) => plot2csv_vision::color::dominant_colors(img, self.panel_inner(), 10, 12.0),
+                // More than the 10 swatches shown: the colour test needs every series.
+                Some(img) => plot2csv_vision::color::dominant_colors(img, self.panel_inner(), 24, 12.0),
                 None => Vec::new(),
             };
             self.data_ui.dominant = Some((id, cols));
@@ -465,7 +511,7 @@ impl Plot2CsvApp {
             ui.horizontal_wrapped(|ui| {
                 for (t, label, tip) in [
                     (Tool::MaskBox, "Box", "Drag a box to include an area"),
-                    (Tool::MaskPen, "Pen", "Paint the area of interest"),
+                    (Tool::MaskPen, "Pen", "Paint over the curve: the dataset takes the curve's colour if it has another one"),
                     (Tool::MaskErase, "Erase", "Erase parts of the mask"),
                 ] {
                     if ui.selectable_label(self.data_ui.tool == t, label).on_hover_text(tip).clicked() {
@@ -656,7 +702,7 @@ impl Plot2CsvApp {
                 painter.circle_filled(s, r, col);
                 painter.circle_stroke(s, r, outline);
                 if let (Some(l), true) = (&p.label, i == active) {
-                    painter.text(s + egui::vec2(5.0, -5.0), egui::Align2::LEFT_BOTTOM, l, egui::FontId::proportional(11.0), col);
+                    painter.text(s + egui::vec2(5.0, -5.0), egui::Align2::LEFT_BOTTOM, l, egui::FontId::proportional(13.0), col);
                 }
             }
         }
@@ -776,6 +822,9 @@ impl Plot2CsvApp {
                     let r = self.data_ui.pen_width / 2.0;
                     if let Some(m) = self.mask_edit() {
                         paint_stroke(&mut m.bits, m.w, m.h, &stroke, r, !erase);
+                    }
+                    if !erase {
+                        self.pick_color_under_stroke(&stroke, r);
                     }
                     self.commit_mask(ctx);
                 }

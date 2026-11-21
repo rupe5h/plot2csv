@@ -17,6 +17,7 @@ pub enum Dialog {
     Datasets,
     AcquiredData,
     Shortcuts,
+    Licenses,
     Equations,
     About,
 }
@@ -40,6 +41,69 @@ fn modal<R>(ctx: &egui::Context, id: &str, title: &str, width: f32, body: impl F
     (!(closed || esc), inner)
 }
 
+const PLOT2CSV_LICENSE: &str = include_str!("../../../LICENSE");
+/// Copy of indra-ocr's LICENSE (same SHA-256 as pinned in xtask).
+const INDRA_MODELS_LICENSE: &str = include_str!("../licenses/indra-ocr-models.txt");
+const ONNXRUNTIME_LICENSE: &str = include_str!("../licenses/onnxruntime.txt");
+
+fn license_text(ui: &mut egui::Ui, id: &str, title: &str, text: &str) {
+    egui::CollapsingHeader::new(title).id_salt(id).default_open(false).show(ui, |ui| {
+        egui::Frame::new().fill(ui.visuals().extreme_bg_color).inner_margin(6).show(ui, |ui| {
+            ui.label(RichText::new(text).small());
+        });
+    });
+}
+
+/// Body of Help → Licences: plot2csv (AGPL-3.0-or-later) and the bundled
+/// components, with the OCR models' restrictive licence called out.
+fn licenses_ui(ui: &mut egui::Ui) {
+    ui.label(RichText::new("plot2csv").heading());
+    ui.label("Copyright © 2026 the plot2csv authors.");
+    ui.label("plot2csv is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License, version 3 or (at your option) any later version. If you distribute it, or let people use a modified version over a network, you must offer them its complete source code under the same licence. It comes with NO WARRANTY.");
+    license_text(ui, "lic_agpl", "GNU Affero General Public License v3 (plot2csv)", PLOT2CSV_LICENSE);
+    ui.add_space(8.0);
+
+    ui.label(RichText::new("Bundled OCR models: a different licence").heading().color(widgets::WARN));
+    egui::Frame::new().stroke(egui::Stroke::new(1.0, widgets::WARN)).corner_radius(4).inner_margin(8).show(ui, |ui| {
+        ui.label(
+            RichText::new("The AGPL above does NOT cover the OCR models.").strong(),
+        );
+        ui.label("Text recognition uses the indra-ocr detection and recognition models (v1.1.0) by Datalab, which are bundled with this app. Their weights are under Datalab's modified AI Pubs Open RAIL-M License, which restricts use:");
+        for item in [
+            "Free for personal use and research.",
+            "Any other use is allowed only if you (or your employer, or the entity you are affiliated with) had no more than US$20 million in gross revenue in the prior year and have raised no more than US$20 million in total funding.",
+            "Not for use by anyone who offers a product or service that competes with Datalab's.",
+            "No use that breaks the law or infringes third-party intellectual property.",
+            "Anyone who redistributes the models must pass on this licence and its use restrictions. The licence terms also extend to the models' output.",
+        ] {
+            ui.horizontal(|ui| {
+                ui.label("•");
+                ui.add(egui::Label::new(item).wrap());
+            });
+        }
+        ui.horizontal(|ui| {
+            ui.label("Commercial licences:");
+            ui.hyperlink_to("datalab.to/pricing", "https://www.datalab.to/pricing");
+        });
+        ui.horizontal(|ui| {
+            ui.label("Models:");
+            ui.hyperlink_to("huggingface.co/datalab-to/indra-ocr", "https://huggingface.co/datalab-to/indra-ocr");
+        });
+        ui.label(RichText::new("This is a summary; the full licence below is what applies. Read it before using the OCR commercially or redistributing this app.").weak().small());
+        license_text(ui, "lic_indra", "Full licence: indra-ocr models (modified Open RAIL-M)", INDRA_MODELS_LICENSE);
+    });
+    ui.add_space(8.0);
+
+    ui.label(RichText::new("Other components").heading());
+    ui.horizontal_wrapped(|ui| {
+        ui.label("The OCR pre- and post-processing is a Rust port of Datalab's indra code, which is under the Apache License 2.0:");
+        ui.hyperlink_to("github.com/datalab-to/indra", "https://github.com/datalab-to/indra");
+    });
+    ui.label("onnxruntime-web 1.31.1, which runs the OCR models in the browser, is under the MIT License, © Microsoft Corporation.");
+    license_text(ui, "lic_ort", "MIT License (onnxruntime-web)", ONNXRUNTIME_LICENSE);
+    ui.label("The Rust libraries compiled into the app (egui, eframe, image, imageproc, nalgebra and others) are under the MIT and/or Apache-2.0 licences.");
+}
+
 impl Plot2CsvApp {
     pub fn show_dialog(&mut self, ctx: &egui::Context) {
         let Some(d) = self.dialog.clone() else { return };
@@ -57,27 +121,44 @@ impl Plot2CsvApp {
                 open && !close
             }
             Dialog::Shortcuts => {
-                let (open, close) = modal(ctx, "keys", "Keyboard Shortcuts", 420.0, |ui| {
-                    egui::Grid::new("keys").num_columns(2).striped(true).show(ui, |ui| {
-                        for (k, v) in [
-                            ("Mouse wheel / pinch", "Zoom about the pointer"),
-                            ("Right- or middle-drag, Space+drag", "Pan"),
-                            ("+ / − / F", "Zoom in / out / fit"),
-                            ("Enter", "Approve the current stage and continue"),
-                            ("Ctrl+V", "Paste an image"),
-                            ("A / S / D", "Add / Adjust / Delete point (Data stage)"),
-                            ("Arrow keys", "Move the selected point by 1 px"),
-                            ("Shift + Arrow", "Move by 10 px"),
-                            ("Alt + Arrow", "Move by ¼ px"),
-                            ("Q / W", "Select next / previous point"),
-                            ("Delete", "Delete the selected point or text box"),
-                            ("Esc", "Close a dialog"),
+                let (open, close) = modal(ctx, "keys", "Keyboard Shortcuts", 700.0, |ui| {
+                    egui::Grid::new("keys").num_columns(3).striped(true).spacing([12.0, 4.0]).show(ui, |ui| {
+                        ui.label(RichText::new("Action").strong());
+                        ui.label(RichText::new("Windows / Linux").strong());
+                        ui.label(RichText::new("macOS").strong());
+                        ui.end_row();
+                        // (action, Windows / Linux, macOS). Key names are spelled out:
+                        // the bundled fonts have no ⌘ or ⌥ glyphs.
+                        for (action, pc, mac) in [
+                            ("Zoom about the pointer", "Mouse wheel / pinch", "Two-finger scroll / pinch"),
+                            ("Pan", "Space+drag, right- or middle-drag", "Space+drag, right-drag"),
+                            ("Zoom in / out / fit", "+ / − / F", "+ / − / F"),
+                            ("Approve the current stage and continue", "Enter", "Return"),
+                            ("Paste an image", "Ctrl+V", "Cmd+V"),
+                            ("Add / Adjust / Delete point (Data stage)", "A / S / D", "A / S / D"),
+                            ("Move the selected point by 1 px", "Arrow keys", "Arrow keys"),
+                            ("Move by 10 px", "Shift+Arrow", "Shift+Arrow"),
+                            ("Move by ¼ px", "Alt+Arrow", "Option+Arrow"),
+                            ("Select next / previous point", "Q / W", "Q / W"),
+                            ("Delete the selected point or text box", "Delete or Backspace", "Delete"),
+                            ("Close a dialog", "Esc", "Esc"),
                         ] {
-                            ui.label(RichText::new(k).monospace());
-                            ui.label(v);
+                            ui.label(action);
+                            ui.label(RichText::new(pc).strong());
+                            ui.label(RichText::new(mac).strong());
                             ui.end_row();
                         }
                     });
+                    ui.add_space(4.0);
+                    ui.button("Close").clicked()
+                });
+                open && !close
+            }
+            Dialog::Licenses => {
+                let max_h = ctx.content_rect().height() * 0.7;
+                let (open, close) = modal(ctx, "licenses", "Licences", 560.0, |ui| {
+                    egui::ScrollArea::vertical().max_height(max_h).auto_shrink([false, true]).show(ui, licenses_ui);
+                    ui.add_space(4.0);
                     ui.button("Close").clicked()
                 });
                 open && !close
@@ -99,8 +180,10 @@ impl Plot2CsvApp {
                     ui.label(RichText::new("plot2csv — plot digitizer").heading());
                     ui.label("Extract numerical data from images of plots, in the spirit of WebPlotDigitizer, with an automatic pipeline you review at every step: rotation/perspective correction, plot-area detection, OCR of labels, axis calibration and series extraction.");
                     ui.add_space(4.0);
-                    ui.label("OCR: indra-ocr models (Datalab) on onnxruntime-web. Model weights are under a modified OpenRAIL-M licence; code under Apache-2.0.");
+                    ui.label("OCR: indra-ocr models (Datalab) on onnxruntime-web.");
                     ui.label("Runs entirely in your browser; nothing is uploaded.");
+                    ui.add_space(4.0);
+                    ui.label("plot2csv is licensed under the GNU AGPL v3 or later. The bundled OCR models are under a different, more restrictive licence: see Help → Licences.");
                     ui.button("Close").clicked()
                 });
                 open && !close

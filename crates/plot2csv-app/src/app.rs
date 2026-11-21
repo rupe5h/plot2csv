@@ -66,6 +66,7 @@ pub struct Plot2CsvApp {
     pub measure: MeasureUi,
     pub table_opts: TableOptions,
     pub show_overlays: bool,
+    pub tips: crate::tips::Tips,
 }
 
 impl Plot2CsvApp {
@@ -93,6 +94,7 @@ impl Plot2CsvApp {
             measure: MeasureUi::default(),
             table_opts: TableOptions { format: plot2csv_core::NumFormat::Fixed, digits: 4, ..Default::default() },
             show_overlays: true,
+            tips: crate::tips::Tips::load(),
         }
     }
 
@@ -469,8 +471,29 @@ impl Plot2CsvApp {
                 });
             });
             ui.menu_button("Help", |ui| {
+                if ui.button("Tip for this stage").clicked() {
+                    self.tips.reopen(self.stage);
+                }
                 if ui.button("Keyboard Shortcuts").clicked() {
                     self.dialog = Some(Dialog::Shortcuts);
+                }
+                ui.separator();
+                if crate::platform::offline_copy_available()
+                    && ui
+                        .button("Download for Offline Use")
+                        .on_hover_text("Save this app as one HTML file. Open it from disk later; it works without internet.")
+                        .clicked()
+                {
+                    self.status = match crate::platform::save_offline_copy("plot2csv.html") {
+                        Ok(bytes) => format!(
+                            "Downloading plot2csv.html ({:.0} MB). Open it from your downloads folder any time; it works offline.",
+                            bytes as f64 / 1e6
+                        ),
+                        Err(e) => format!("Could not save an offline copy: {e}"),
+                    };
+                }
+                if ui.button("Licences").clicked() {
+                    self.dialog = Some(Dialog::Licenses);
                 }
                 if ui.button("About").clicked() {
                     self.dialog = Some(Dialog::About);
@@ -504,7 +527,7 @@ impl Plot2CsvApp {
             let gear = egui::Rect::from_min_size(r.right_top() + Vec2::new(-22.0, 2.0), Vec2::splat(20.0));
             let gr = ui.interact(gear, ui.scope_id().with("mag_gear"), egui::Sense::click()).on_hover_text(format!("Magnifier zoom {}× (click to change)", self.mag_zoom));
             ui.painter().rect_filled(gear, 3.0, Color32::from_white_alpha(200));
-            ui.painter().text(gear.center(), Align2::CENTER_CENTER, "⚙", egui::FontId::proportional(14.0), Color32::from_gray(60));
+            ui.painter().text(gear.center(), Align2::CENTER_CENTER, "⚙", egui::FontId::proportional(16.0), Color32::from_gray(60));
             if gr.clicked() {
                 self.mag_zoom = if self.mag_zoom >= 16.0 { 2.0 } else { self.mag_zoom * 2.0 };
             }
@@ -660,7 +683,7 @@ impl Plot2CsvApp {
                 view.rect.center(),
                 Align2::CENTER_CENTER,
                 "Drop a plot image here\nor use File → Load Image / Ctrl+V",
-                egui::FontId::proportional(20.0),
+                egui::FontId::proportional(22.0),
                 Color32::GRAY,
             );
             if view.response.double_clicked() {
@@ -746,7 +769,7 @@ impl Plot2CsvApp {
                 egui::Frame::popup(ui.style()).inner_margin(16.0).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label(egui::RichText::new(msg).size(16.0));
+                        ui.label(egui::RichText::new(msg).size(18.0));
                     });
                 });
             });
@@ -793,11 +816,16 @@ impl eframe::App for Plot2CsvApp {
         egui::Panel::right("side").resizable(true).default_size(340.0).size_range(280.0..=560.0).show(ui, |ui| {
             self.sidebar(ui, &ctx);
         });
-        egui::CentralPanel::default().show(ui, |ui| {
-            self.panel_tabs(ui, &ctx);
-            self.canvas_area(ui, &ctx);
-        });
+        let canvas_rect = egui::CentralPanel::default()
+            .show(ui, |ui| {
+                self.panel_tabs(ui, &ctx);
+                self.canvas_area(ui, &ctx);
+            })
+            .response
+            .rect;
         self.show_dialog(&ctx);
+        let hold_tip = self.is_busy() || self.dialog.is_some();
+        self.tips.show(&ctx, self.stage, canvas_rect, hold_tip);
         self.global_keys(&ctx);
         self.busy_overlay(&ctx);
     }

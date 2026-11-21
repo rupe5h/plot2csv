@@ -1,7 +1,7 @@
 //! ⑦ Export: WebPlotDigitizer's "Acquired Data" view, CSV/ZIP/JSON export and a plot preview.
 
 use egui::{Color32, Stroke};
-use egui_plot::{Line, Plot, PlotPoints, Points};
+use egui_plot::{HoverPosition, Line, Plot, PlotPoints, Points};
 use plot2csv_core::axes::Calibration;
 use plot2csv_core::dataset::Dataset;
 use plot2csv_core::export::{export_zip, long_csv, series_csv, wide_csv, SeriesRef};
@@ -11,6 +11,7 @@ use plot2csv_core::NumFormat;
 use super::pos;
 use crate::app::Plot2CsvApp;
 use crate::canvas::CanvasView;
+use crate::log_axis;
 use crate::platform;
 use crate::widgets::{self, c32};
 
@@ -204,29 +205,48 @@ impl Plot2CsvApp {
         if self.export_ui.plot_preview {
             let all = self.all_series();
             let pid = self.project.active_panel;
+            let series: Vec<&SeriesOwned> = all.iter().filter(|s| Some(s.0) == pid).collect();
+            // Datasets of a panel share its calibration, so its log axes apply to all of them.
+            let (log_x, log_y) = series.first().map(|s| preview_log_axes(&s.2)).unwrap_or_default();
             let rect = view.rect;
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
             child.painter().rect_filled(rect, 0.0, child.visuals().panel_fill);
-            Plot::new("preview").legend(egui_plot::Legend::default()).show(&mut child, |pu| {
-                for (pid2, _, cal, ds) in all.iter().filter(|s| Some(s.0) == pid) {
-                    let _ = pid2;
+            // A separate id per scale so a remembered (panned) view isn't reused in the other space.
+            let mut plot = Plot::new(("preview", log_x, log_y)).legend(egui_plot::Legend::default());
+            if log_x {
+                plot = plot.x_grid_spacer(log_axis::grid_marks).x_axis_formatter(log_axis::tick_label);
+            }
+            if log_y {
+                plot = plot.y_grid_spacer(log_axis::grid_marks).y_axis_formatter(log_axis::tick_label);
+            }
+            if log_x || log_y {
+                let fmt = move |v: f64, log: bool| if log { log_axis::format_value(10f64.powf(v), 4) } else { format!("{v:.3}") };
+                plot = plot.label_formatter(move |pos| {
+                    Some(match pos {
+                        HoverPosition::NearDataPoint { plot_name, position, .. } => {
+                            format!("{plot_name}\nx = {}\ny = {}", fmt(position.x, log_x), fmt(position.y, log_y))
+                        }
+                        HoverPosition::Elsewhere { position } => format!("x = {}\ny = {}", fmt(position.x, log_x), fmt(position.y, log_y)),
+                    })
+                });
+            }
+            let scale = |v: f64, log: bool| if log { v.log10() } else { v };
+            plot.show(&mut child, |pu| {
+                for (_, _, cal, ds) in series {
                     let mut pts: Vec<[f64; 2]> = ds
                         .points
                         .iter()
                         .map(|p| {
-                            let d = cal.to_data(p.pt());
-                            if d.len() >= 2 {
-                                [d[0], d[1]]
-                            } else {
-                                [p.x, d[0]]
-                            }
+                            let [x, y] = preview_xy(cal, p.pt());
+                            [scale(x, log_x), scale(y, log_y)]
                         })
+                        .filter(|p| p[0].is_finite() && p[1].is_finite())
                         .collect();
                     let col = c32(ds.color);
                     if matches!(ds.style, plot2csv_core::SeriesStyle::Markers | plot2csv_core::SeriesStyle::Bars) {
                         pu.points(Points::new(ds.name.clone(), PlotPoints::from(pts)).color(col).radius(3.0));
                     } else {
-                        pts.sort_by(|a, b| a[0].partial_cmp(&b[0]).unwrap());
+                        pts.sort_by(|a, b| a[0].total_cmp(&b[0]));
                         pu.line(Line::new(ds.name.clone(), PlotPoints::from(pts)).color(col).width(2.0));
                     }
                 }
@@ -243,5 +263,26 @@ impl Plot2CsvApp {
                 painter.circle_stroke(s, 3.0, Stroke::new(0.5, Color32::BLACK));
             }
         }
+    }
+}
+
+/// The (x, y) a data point is re-plotted at: the first two values, or for single-value
+/// calibrations (bars) the pixel x against the value.
+fn preview_xy(cal: &Calibration, p: plot2csv_core::geom::Pt) -> [f64; 2] {
+    let d = cal.to_data(p);
+    if d.len() >= 2 {
+        [d[0], d[1]]
+    } else {
+        [p.x, d[0]]
+    }
+}
+
+/// Which re-plotted axes (x, y) are logarithmic on the source plot, matching [`preview_xy`].
+fn preview_log_axes(cal: &Calibration) -> (bool, bool) {
+    match cal {
+        Calibration::Xy(c) => (c.log_x, c.log_y),
+        Calibration::Bar(c) => (false, c.log),
+        Calibration::Polar(c) => (c.log_r, false),
+        Calibration::Ternary(_) | Calibration::Map(_) | Calibration::Image => (false, false),
     }
 }

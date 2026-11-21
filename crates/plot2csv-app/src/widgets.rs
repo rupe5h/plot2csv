@@ -21,6 +21,15 @@ pub fn apply_theme(ctx: &egui::Context, dark: bool) {
     ctx.global_style_mut(|s| {
         s.spacing.item_spacing = Vec2::new(6.0, 5.0);
         s.spacing.button_padding = Vec2::new(7.0, 3.0);
+        // egui's defaults + 2 pt. Rebuilt from the defaults (not the current sizes) since
+        // this runs again on every theme toggle.
+        s.text_styles = egui::style::default_text_styles()
+            .into_iter()
+            .map(|(style, mut font)| {
+                font.size += 2.0;
+                (style, font)
+            })
+            .collect();
     });
 }
 
@@ -34,6 +43,9 @@ pub fn status_badge(s: StageStatus) -> (Color32, &'static str) {
     }
 }
 
+/// Circled stage numbers, indexed like `Stage::ALL`.
+pub const STAGE_NUMS: [&str; 7] = ["①", "②", "③", "④", "⑤", "⑥", "⑦"];
+
 /// The ① Import › ② Correct › … bar. Returns a stage the user clicked.
 pub fn stepper(
     ui: &mut egui::Ui,
@@ -46,13 +58,13 @@ pub fn stepper(
         ui.spacing_mut().item_spacing.x = 2.0;
         for (i, st) in Stage::ALL.iter().enumerate() {
             if i > 0 {
-                ui.label(egui::RichText::new("›").color(Color32::from_gray(140)).size(16.0));
+                ui.label(egui::RichText::new("›").color(Color32::from_gray(140)).size(18.0));
             }
             let (col, word) = status_badge(status(*st));
             let enabled = can_open(*st);
             let selected = *st == current;
-            let text = format!("{} {}", ["①", "②", "③", "④", "⑤", "⑥", "⑦"][i], st.title());
-            let mut rt = egui::RichText::new(text).size(14.0);
+            let text = format!("{} {}", STAGE_NUMS[i], st.title());
+            let mut rt = egui::RichText::new(text).size(16.0);
             if selected {
                 rt = rt.strong();
             }
@@ -101,7 +113,7 @@ pub fn marker(p: &egui::Painter, at: Pos2, color: Color32, radius: f32, label: O
     p.circle_stroke(at, radius, Stroke::new(1.0, Color32::from_rgba_unmultiplied(0, 0, 0, 160)));
     if let Some(l) = label {
         let pos = at + Vec2::new(radius + 3.0, -radius - 3.0);
-        let font = FontId::proportional(14.0);
+        let font = FontId::proportional(16.0);
         p.text(pos + Vec2::new(1.0, 1.0), Align2::LEFT_BOTTOM, l, font.clone(), Color32::from_rgba_unmultiplied(255, 255, 255, 200));
         p.text(pos, Align2::LEFT_BOTTOM, l, font, color);
     }
@@ -117,7 +129,7 @@ pub fn cal_marker(p: &egui::Painter, at: Pos2, color: Color32, label: &str, sele
     p.line_segment([at - Vec2::new(r, 0.0), at + Vec2::new(r, 0.0)], s);
     p.line_segment([at - Vec2::new(0.0, r), at + Vec2::new(0.0, r)], s);
     p.circle_stroke(at, 3.0, s);
-    let font = FontId::proportional(15.0);
+    let font = FontId::proportional(17.0);
     let pos = at + Vec2::new(6.0, 6.0);
     p.text(pos + Vec2::new(1.0, 1.0), Align2::LEFT_TOP, label, font.clone(), Color32::WHITE);
     p.text(pos, Align2::LEFT_TOP, label, font, color);
@@ -125,7 +137,7 @@ pub fn cal_marker(p: &egui::Painter, at: Pos2, color: Color32, label: &str, sele
 
 /// Text with a translucent backing box, for canvas labels.
 pub fn label_box(p: &egui::Painter, at: Pos2, anchor: Align2, text: &str, color: Color32) {
-    let galley = p.layout_no_wrap(text.to_string(), FontId::proportional(13.0), color);
+    let galley = p.layout_no_wrap(text.to_string(), FontId::proportional(15.0), color);
     let rect = anchor.anchor_size(at, galley.size()).expand(2.0);
     p.rect_filled(rect, CornerRadius::same(2), Color32::from_rgba_unmultiplied(255, 255, 255, 215));
     p.galley(rect.min + Vec2::splat(2.0), galley, color);
@@ -134,7 +146,7 @@ pub fn label_box(p: &egui::Painter, at: Pos2, anchor: Align2, text: &str, color:
 /// A small section header in the sidebar.
 pub fn section(ui: &mut egui::Ui, title: &str) {
     ui.add_space(4.0);
-    ui.label(egui::RichText::new(title).strong().size(14.0));
+    ui.label(egui::RichText::new(title).strong().size(16.0));
 }
 
 /// A colour swatch button; returns its response.

@@ -70,21 +70,67 @@ fn rect(l: &TextLine) -> RectF {
 
 /// Merge the lines of all crops into classified text items. Vertical-pass lines
 /// are kept only when they are real words not overlapping horizontal text.
+/// The horizontal pass reads a sideways title as a column of one- or
+/// two-glyph lines no wider than the title; a real vertical word replaces those.
 pub fn merge_items(collected: Vec<(TextLine, bool)>, inner: &RectF) -> Vec<TextItem> {
+    let overlap = |a: &RectF, b: &RectF| a.intersect(b).map(|i| i.area() > 0.2 * a.area().min(b.area())).unwrap_or(false);
+    let word = |l: &TextLine| {
+        let r = rect(l);
+        l.text.chars().filter(|c| c.is_alphabetic()).count() >= 2 && l.conf >= 0.6 && r.height() > 1.5 * r.width()
+    };
+    let fragment_of = |l: &TextLine, v: &RectF| {
+        let r = rect(l);
+        l.text.chars().filter(|c| !c.is_whitespace()).count() <= 2 && r.width() <= 1.5 * v.width() && overlap(&r, v)
+    };
+    let words: Vec<RectF> = collected.iter().filter(|(l, v)| *v && word(l)).map(|(l, _)| rect(l)).collect();
+    let collected: Vec<(TextLine, bool)> =
+        collected.into_iter().filter(|(l, v)| *v || !words.iter().any(|w| fragment_of(l, w))).collect();
     let horizontal: Vec<RectF> = collected.iter().filter(|(_, v)| !v).map(|(l, _)| rect(l)).collect();
     let lines: Vec<(TextLine, bool)> = collected
         .into_iter()
-        .filter(|(l, v)| {
-            if !v {
-                return true;
-            }
-            let r = rect(l);
-            let letters = l.text.chars().filter(|c| c.is_alphabetic()).count();
-            let overlaps = horizontal.iter().any(|h| h.intersect(&r).map(|i| i.area() > 0.2 * r.area().min(h.area())).unwrap_or(false));
-            letters >= 2 && l.conf >= 0.6 && !overlaps && r.height() > 1.5 * r.width()
-        })
+        .filter(|(l, v)| !v || (word(l) && !horizontal.iter().any(|h| overlap(h, &rect(l)))))
         .collect();
     items_from_lines(&lines, inner)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plot2csv_core::project::TextRole;
+
+    fn line(b: [f32; 4], text: &str, conf: f32, vertical: bool) -> (TextLine, bool) {
+        (TextLine { bbox: b, text: text.into(), conf, chars: vec![] }, vertical)
+    }
+
+    #[test]
+    fn vertical_title_replaces_glyph_fragments() {
+        let inner = RectF::new(92.0, 15.0, 688.0, 422.0);
+        let collected = vec![
+            line([60.0, 214.0, 85.0, 222.0], "0.01", 1.0, false),
+            line([24.0, 179.0, 34.0, 190.0], "g", 0.72, false),
+            line([24.0, 200.0, 32.0, 208.0], "c", 0.71, false),
+            line([21.0, 278.0, 33.0, 286.0], "o", 0.63, false),
+            line([21.0, 124.0, 32.0, 311.0], "Mode correlation coefficient", 0.97, true),
+        ];
+        let items = merge_items(collected, &inner);
+        let texts: Vec<&str> = items.iter().map(|i| i.text.as_str()).collect();
+        assert_eq!(texts.len(), 2, "{texts:?}");
+        let title = items.iter().find(|i| i.vertical).expect("vertical title kept");
+        assert_eq!(title.role, TextRole::YTitle);
+        assert!(items.iter().any(|i| i.text == "0.01"));
+    }
+
+    #[test]
+    fn vertical_read_under_wide_text_is_dropped() {
+        let inner = RectF::new(92.0, 15.0, 688.0, 422.0);
+        let collected = vec![
+            line([10.0, 150.0, 85.0, 165.0], "Amplitude", 0.95, false),
+            line([30.0, 140.0, 40.0, 200.0], "ldmA", 0.7, true),
+        ];
+        let items = merge_items(collected, &inner);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].text, "Amplitude");
+    }
 }
 
 /// Boxes (corrected px) of tick labels that the line detector missed: for each

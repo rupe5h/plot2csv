@@ -17,6 +17,23 @@
 <div id="wp_loading">Loading plot2csv…<small id="wp_loading_detail"></small></div>
 <!--PAYLOADS-->
 <script type="module">
+// Help → Download for Offline Use. Module scripts run in order after parsing, so
+// this first one copies the page as loaded, before the app or egui changes the DOM.
+// The copy includes this script, so a saved page can save itself again.
+const wpPage = document.documentElement.cloneNode(true);
+globalThis.wpOfflineHtml = () => "<!doctype html>\n" + wpPage.outerHTML;
+globalThis.wpSaveOffline = (name) => {
+  const blob = new Blob([globalThis.wpOfflineHtml()], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return blob.size;
+};
+</script>
+<script type="module">
 /*ORT_JS*/
 </script>
 <script type="module">

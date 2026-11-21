@@ -34,7 +34,7 @@ rfd = "0.18"
 wasm-bindgen = "=0.2.130"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement", "HtmlElement", "Element", "Blob", "BlobPropertyBag", "Url", "HtmlAnchorElement", "HtmlInputElement", "FileList", "File", "FileReader", "ClipboardEvent", "DataTransfer", "DataTransferItemList", "DataTransferItem", "Event", "EventTarget", "console"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement", "HtmlElement", "Element", "Blob", "BlobPropertyBag", "Url", "HtmlAnchorElement", "HtmlInputElement", "FileList", "File", "FileReader", "ClipboardEvent", "DataTransfer", "DataTransferItemList", "DataTransferItem", "Event", "EventTarget", "Storage", "console"] }
 console_error_panic_hook = "0.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

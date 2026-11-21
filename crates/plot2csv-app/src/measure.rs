@@ -28,6 +28,11 @@ impl MeasureUi {
         self.deleting = false;
         self.pending.clear();
     }
+
+    /// Drop the half-made measurement (after undo/redo).
+    pub fn clear_transient(&mut self) {
+        self.pending.clear();
+    }
 }
 
 const COL: Color32 = Color32::from_rgb(220, 20, 20);
@@ -123,6 +128,7 @@ impl Plot2CsvApp {
         if let (Some(last), Some(h)) = (self.measure.pending.last(), view.hover) {
             painter.line_segment([view.to_screen(pos(*last)), view.to_screen(h)], Stroke::new(1.0, COL));
         }
+        view.set_cursor(egui::CursorIcon::Crosshair);
         let ctx = ui.ctx().clone();
         if !ctx.egui_wants_keyboard_input() {
             if ctx.input(|i| i.key_pressed(egui::Key::A)) {

@@ -1,6 +1,6 @@
 //! ⑥ Data: datasets, WebPlotDigitizer's manual and automatic tools, auto-detection.
 
-use egui::{Color32, Pos2, Rect, Stroke, StrokeKind, TextureHandle};
+use egui::{Color32, CursorIcon, Pos2, Rect, Stroke, StrokeKind, TextureHandle};
 use plot2csv_core::dataset::{Algorithm, ColorMode, DataPoint, Dataset, Mask, SeriesStyle, PALETTE};
 use plot2csv_core::geom::RectF;
 use plot2csv_core::project::Stage;
@@ -9,6 +9,7 @@ use plot2csv_vision::color::ColorCount;
 use super::region::to_rect;
 use super::{arrow_nudge, pos, pt};
 use crate::app::Plot2CsvApp;
+use crate::icons::{self, Icon};
 use crate::canvas::CanvasView;
 use crate::dialogs::Dialog;
 use crate::images::bitmap_texture;
@@ -75,7 +76,8 @@ impl Default for DataUi {
             box_start: None,
             box_cur: None,
             filter_tex: None,
-            show_mask: false,
+            // The mask of the selected dataset is shown while reviewing.
+            show_mask: true,
             show_filter: false,
             dominant: None,
             rename: None,
@@ -92,6 +94,18 @@ impl DataUi {
 
     pub fn pans_with_primary(&self) -> bool {
         matches!(self.tool, Tool::None)
+    }
+
+    /// Drop selections, drags and caches that may refer to replaced data
+    /// (after undo/redo). Keeps the mode, tool and view options.
+    pub fn clear_transient(&mut self) {
+        self.selected = None;
+        self.dragging = false;
+        self.stroke.clear();
+        self.box_start = None;
+        self.box_cur = None;
+        self.rename = None;
+        self.invalidate_caches();
     }
 }
 
@@ -282,7 +296,9 @@ impl Plot2CsvApp {
                 let region = self.panel_inner().unwrap_or(RectF::new(0.0, 0.0, w as f64, h as f64));
                 let tracks = plot2csv_vision::series::track_curves(&bm, &region, *max_jump, *max_gap);
                 let best = tracks.into_iter().max_by(|a, b| a.pts.len().cmp(&b.pts.len()));
-                Ok(best.map(|t| t.pts.iter().step_by(6).map(|&(x, y)| DataPoint::new(x, y)).collect()).unwrap_or_default())
+                // On the panel's sampling grid, like the auto-detected curves, so the series line up in exports.
+                let dx = plot2csv_vision::series::sample_step(&region);
+                Ok(best.map(|t| plot2csv_vision::series::sample_track(&t, dx, region.x0)).unwrap_or_default())
             }
             alg => plot2csv_vision::extract::run(alg, &bm, cal.as_ref()),
         };
@@ -291,14 +307,9 @@ impl Plot2CsvApp {
                 if matches!(ds.auto.algorithm, Algorithm::Bar { .. }) {
                     let items = self.project.active_work().and_then(|w| w.text.value.clone()).unwrap_or_default();
                     let inner = self.panel_inner().unwrap_or_default();
+                    let cats = plot2csv_vision::series::CategoryLabels::new(&items, &inner);
                     for p in pts.iter_mut() {
-                        p.label = items
-                            .iter()
-                            .filter(|it| it.bbox.center().y > inner.y1 && it.value.is_none())
-                            .map(|it| ((it.bbox.center().x - p.x).abs(), it))
-                            .filter(|(d, it)| *d < it.bbox.width().max(20.0))
-                            .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
-                            .map(|(_, it)| it.text.clone());
+                        p.label = cats.at(p.x);
                     }
                 }
                 let n = pts.len();
@@ -429,7 +440,7 @@ impl Plot2CsvApp {
                 }
                 ui.label(egui::RichText::new(format!("{}", d.points.len())).weak());
                 ui.checkbox(&mut d2.visible, "").on_hover_text("Show on image");
-                if ui.small_button("🗑").on_hover_text("Delete dataset").clicked() {
+                if ui.small_button(icons::image(ui, Icon::TrashCan)).on_hover_text("Delete dataset").clicked() {
                     delete = Some(i);
                 }
             });
@@ -454,7 +465,7 @@ impl Plot2CsvApp {
             self.set_active_ds(i);
         }
         ui.horizontal(|ui| {
-            if ui.button("＋ Add dataset").clicked() {
+            if ui.button((icons::image(ui, Icon::Plus), "Add dataset")).clicked() {
                 self.add_dataset(None);
             }
             if ui.button("Manage…").clicked() {
@@ -491,7 +502,7 @@ impl Plot2CsvApp {
         if self.data_ui.tool == Tool::Add {
             if let Some(d) = self.datasets().get(self.active_ds_index()) {
                 if d.style == SeriesStyle::Bars {
-                    ui.label(egui::RichText::new("Bar points get the label of the category text under them.").weak().small());
+                    ui.label(egui::RichText::new("Bar points get the label of the category (X tick) text under them.").weak().small());
                 }
             }
         }
@@ -499,7 +510,7 @@ impl Plot2CsvApp {
 
     fn auto_tools(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let Some(mut ds) = self.datasets().get(self.active_ds_index()).cloned() else {
-            if ui.button("＋ Add dataset").clicked() {
+            if ui.button((icons::image(ui, Icon::Plus), "Add dataset")).clicked() {
                 self.add_dataset(None);
             }
             return;
@@ -519,7 +530,7 @@ impl Plot2CsvApp {
                         self.data_ui.show_mask = true;
                     }
                 }
-                ui.toggle_value(&mut self.data_ui.show_mask, "View");
+                ui.toggle_value(&mut self.data_ui.show_mask, (icons::image(ui, Icon::Eye), "View")).on_hover_text("Show the selected dataset's mask (yellow)");
                 if ui.small_button("Erase All").clicked() {
                     ds.auto.mask = None;
                     self.data_ui.mask = None;
@@ -548,7 +559,7 @@ impl Plot2CsvApp {
                     self.dialog = Some(Dialog::ColorPicker { background: ds.auto.color_mode == ColorMode::Background });
                 }
                 let pick = if ds.auto.color_mode == ColorMode::Foreground { Tool::PickFg } else { Tool::PickBg };
-                if ui.selectable_label(self.data_ui.tool == pick, "🖊 Pick").on_hover_text("Pick the colour from the image").clicked() {
+                if ui.selectable_label(self.data_ui.tool == pick, (icons::image(ui, Icon::EyeDropper), "Pick")).on_hover_text("Pick the colour from the image").clicked() {
                     self.data_ui.tool = pick;
                 }
             });
@@ -670,12 +681,16 @@ impl Plot2CsvApp {
         if let Some(r) = self.panel_inner() {
             painter.rect_stroke(view.rect_to_screen(to_rect(&r)), 0.0, Stroke::new(1.0, Color32::from_rgba_unmultiplied(0, 140, 255, 70)), StrokeKind::Middle);
         }
-        // Filter / mask overlays.
+        // Filter / mask overlays (automatic mode: the mask is what its tools use).
+        let auto_mode = self.data_ui.mode == DataMode::Auto;
+        if auto_mode && self.data_ui.show_mask && !self.data_ui.show_filter {
+            self.ensure_mask_texture(ctx);
+        }
         if self.data_ui.show_filter {
             if let Some(t) = &self.data_ui.filter_tex {
                 painter.image(t.id(), img_rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
             }
-        } else if self.data_ui.show_mask {
+        } else if auto_mode && self.data_ui.show_mask {
             if let Some(t) = self.data_ui.mask.as_ref().and_then(|m| m.tex.as_ref()) {
                 painter.image(t.id(), img_rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
             }
@@ -731,6 +746,15 @@ impl Plot2CsvApp {
             let d = dss.get(active)?;
             d.nearest(pt(p), 12.0 / view.zoom as f64)
         };
+        // Pointer: crosshair where a click places something, a hand over a point that can be dragged.
+        let over_point = view.hover.and_then(|p| nearest(&dss, p)).is_some();
+        match self.data_ui.tool {
+            Tool::Add | Tool::MaskBox | Tool::MaskPen | Tool::MaskErase | Tool::PickFg | Tool::PickBg => view.set_cursor(CursorIcon::Crosshair),
+            Tool::Adjust if self.data_ui.dragging => view.set_cursor(CursorIcon::Grabbing),
+            Tool::Adjust if over_point => view.set_cursor(CursorIcon::Grab),
+            Tool::Delete if over_point => view.set_cursor(CursorIcon::PointingHand),
+            _ => {}
+        }
         match self.data_ui.tool {
             Tool::Add => {
                 if resp.clicked() {
@@ -865,12 +889,7 @@ impl Plot2CsvApp {
         }
         let inner = self.panel_inner()?;
         let items = self.project.active_work()?.text.value.clone()?;
-        items
-            .iter()
-            .filter(|it| it.bbox.center().y > inner.y1 && it.value.is_none())
-            .map(|it| ((it.bbox.center().x - p.x as f64).abs(), it))
-            .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
-            .map(|(_, it)| it.text.clone())
+        plot2csv_vision::series::CategoryLabels::new(&items, &inner).at(p.x as f64)
     }
 
     fn data_keys(&mut self, ctx: &egui::Context) {

@@ -1,6 +1,8 @@
 pub mod app;
 pub mod canvas;
 pub mod dialogs;
+pub mod fonts;
+pub mod icons;
 pub mod images;
 pub mod log_axis;
 pub mod measure;

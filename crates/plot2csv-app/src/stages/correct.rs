@@ -6,6 +6,7 @@ use plot2csv_core::project::{Correction, Stage};
 
 use super::{arrow_nudge, pos, pt};
 use crate::app::Plot2CsvApp;
+use crate::icons::{self, Icon};
 use crate::canvas::CanvasView;
 use crate::widgets;
 
@@ -22,6 +23,12 @@ pub struct CorrectUi {
 impl CorrectUi {
     pub fn editing_quad(&self) -> bool {
         !self.preview
+    }
+
+    /// Drop the drag and selection (after undo/redo).
+    pub fn clear_transient(&mut self) {
+        self.drag = None;
+        self.selected = None;
     }
 }
 
@@ -81,7 +88,7 @@ impl Plot2CsvApp {
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                if ui.button("⟳ Rotate 90°").clicked() {
+                if ui.button((icons::image(ui, Icon::RotateRight), "Rotate 90°")).clicked() {
                     corr.rotate90();
                     changed = true;
                 }
@@ -107,7 +114,11 @@ impl Plot2CsvApp {
             });
         });
         ui.add_space(6.0);
-        let label = if self.correct_ui.preview { "◀ Back to editing corners" } else { "👁 Preview result" };
+        let label = if self.correct_ui.preview {
+            egui::Atoms::new((icons::image(ui, Icon::ChevronLeft), "Back to editing corners"))
+        } else {
+            egui::Atoms::new((icons::image(ui, Icon::Eye), "Preview result"))
+        };
         if ui.add_enabled(corr.enabled, egui::Button::new(label)).clicked() {
             self.correct_ui.preview = !self.correct_ui.preview;
             if self.correct_ui.preview {
@@ -175,6 +186,12 @@ impl Plot2CsvApp {
             return;
         }
         let r = &view.response;
+        // Pointer: a hand over a corner that can be dragged.
+        if self.correct_ui.drag.is_some() {
+            view.set_cursor(egui::CursorIcon::Grabbing);
+        } else if r.hover_pos().is_some_and(|p| sq.iter().any(|s| s.distance(p) < 14.0)) {
+            view.set_cursor(egui::CursorIcon::Grab);
+        }
         if r.drag_started_by(egui::PointerButton::Primary) {
             if let Some(p) = r.interact_pointer_pos() {
                 self.correct_ui.drag = sq

@@ -1,11 +1,12 @@
 use crate::app::Plot2CsvApp;
+use crate::icons::{self, Icon};
 use crate::widgets;
 
 impl Plot2CsvApp {
     pub fn import_sidebar(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         widgets::section(ui, "① Import image");
         ui.horizontal_wrapped(|ui| {
-            if ui.button("📂 Load Image…").clicked() {
+            if ui.button((icons::image(ui, Icon::FolderOpen), "Load Image…")).clicked() {
                 self.open_image_dialog(ctx);
             }
             if ui.button("Import Project…").clicked() {

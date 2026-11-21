@@ -4,6 +4,7 @@ pub mod axes;
 pub mod dataset;
 pub mod export;
 pub mod geom;
+pub mod history;
 pub mod project;
 pub mod table;
 pub mod value;

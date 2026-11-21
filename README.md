@@ -10,17 +10,19 @@ Rust with egui; ships as **one self-contained HTML file** that works offline
 Each stage proposes a result automatically. You review it, edit it in the UI, and
 press **Approve & continue** (or Enter); only then does the next stage run.
 Editing an approved stage marks later stages *stale*. You can then re-run their
-automatic step or keep your edits.
+automatic step or keep your edits. **Edit → Undo / Redo** (Ctrl+Z, Ctrl+Y or
+Ctrl+Shift+Z; Cmd on macOS) steps back through every change, including approvals
+and automatic re-runs; loading an image or project starts a new history.
 
 | Stage | Automatic proposal | What you can edit |
 |---|---|---|
 | ① Import | — | load (file, drag-and-drop, Ctrl+V), optional photo enhancement |
 | ② Correct | rotation and perspective, from the vanishing points of the long line families | drag the 4 corners, rotate slider, 90° turns, output size, preview |
 | ③ Plot area | framed boxes and L-shaped axes, multi-panel figures, outer box with labels, bar-chart guess | add, delete, resize panels; plot type per panel |
-| ④ Text | indra OCR of each panel, a rotated pass for Y titles, tick-guided OCR for missed labels, role classification | role, text, value per item; read text in a drawn box; re-read |
+| ④ Text | indra OCR of each panel, a rotated pass for Y titles, tick-guided OCR for missed labels, role classification | role, text, value per item (double-click a box to correct its text in place); read text in a drawn box; re-read |
 | ⑤ Axes | tick/grid detection plus RANSAC fit of the labels: linear, log (incl. OCR'd superscripts `10°`, `102`), dates | WPD-style calibration points (drag, arrow-nudge) and values; all axis types |
-| ⑥ Data | colour clustering with grid-line removal; markers (blob centroids); lines (multi-curve tracking that separates same-colour solid/dashed/dotted curves through crossings, and joins a spiky curve the legend shows once); bars with category labels; legend names (wrapped entries joined) in legend order | WPD manual tools (add/adjust/delete, Q/W, arrows) and automatic tools (mask box/pen/erase — the pen takes the colour of the curve it paints over, colour picker, dominant colours, distance, Averaging Window, X Step (± interpolation), Blob, Bar, Multi-track); the colour test leaves out pixels that better match another plot colour (grid, other series) |
-| ⑦ Export | — | Acquired Data view (sort raw/X/Y/nearest-neighbour, number format, separator), CSV, long/wide CSV, ZIP, project JSON |
+| ⑥ Data | colour clustering with grid-line removal; markers (blob centroids); lines (multi-curve tracking that separates same-colour solid/dashed/dotted curves through crossings, and joins a spiky curve the legend shows once), all sampled on one X grid per panel; bars with category labels (the X-tick row, never the axis title); legend names (wrapped entries joined) in legend order | WPD manual tools (add/adjust/delete, Q/W, arrows) and automatic tools (mask box/pen/erase, shown by default — the pen takes the colour of the curve it paints over, colour picker, dominant colours, distance, Averaging Window, X Step (± interpolation), Blob, Bar, Multi-track); the colour test leaves out pixels that better match another plot colour (grid, other series) |
+| ⑦ Export | — | Acquired Data view of one series (sort raw/X/Y/nearest-neighbour) or all series side by side (bar charts: always, one row per category), number format, separator; axis titles as column headers; CSV, long/wide CSV, ZIP, project JSON |
 
 Plot types: 2D X-Y (linear, log, dates), bar charts, polar, ternary, map with scale
 bar, and image (pixels). The **Analyze** menu measures distances and angles.
@@ -96,4 +98,6 @@ under the same licence. The AGPL does not cover the OCR models: they are
 use a **modified OpenRAIL-M licence**: free for research, personal use, and
 startups under $20M funding/revenue, and not to be used competitively with
 Datalab's API. Check that this fits your use before you distribute builds.
-onnxruntime-web is MIT.
+onnxruntime-web is MIT. The bundled fonts are Inter (SIL OFL 1.1) and Hack (MIT /
+Bitstream Vera), and the icons are from Font Awesome Free (CC BY 4.0); see
+`crates/plot2csv-app/licenses/` and `crates/plot2csv-app/assets/`.

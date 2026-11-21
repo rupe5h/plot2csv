@@ -4,12 +4,14 @@ use std::sync::mpsc::Receiver;
 
 use egui::{Align2, Color32, Pos2, Vec2};
 use plot2csv_core::geom::Pt;
+use plot2csv_core::history::{Entry, History};
 use plot2csv_core::project::{ImportOptions, Project, SourceImage, Stage, StageStatus};
 use plot2csv_core::table::TableOptions;
 use plot2csv_ocr::TextLine;
 
 use crate::canvas::{CanvasView, ImageCanvas};
 use crate::dialogs::Dialog;
+use crate::icons::{self, Icon};
 use crate::images::Images;
 use crate::measure::MeasureUi;
 use crate::platform;
@@ -23,6 +25,12 @@ struct Busy {
     msg: String,
     frames: u8,
     task: Option<Task>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HistoryOp {
+    Undo,
+    Redo,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -67,10 +75,15 @@ pub struct Plot2CsvApp {
     pub table_opts: TableOptions,
     pub show_overlays: bool,
     pub tips: crate::tips::Tips,
+    /// Undo/redo snapshots of the project.
+    pub history: History,
+    /// Undo/redo requested this frame, applied at the start of the next one.
+    history_op: Option<HistoryOp>,
 }
 
 impl Plot2CsvApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        crate::fonts::install(&cc.egui_ctx);
         widgets::apply_theme(&cc.egui_ctx, false);
         Self {
             project: Project::default(),
@@ -95,6 +108,8 @@ impl Plot2CsvApp {
             table_opts: TableOptions { format: plot2csv_core::NumFormat::Fixed, digits: 4, ..Default::default() },
             show_overlays: true,
             tips: crate::tips::Tips::load(),
+            history: History::default(),
+            history_op: None,
         }
     }
 
@@ -197,6 +212,7 @@ impl Plot2CsvApp {
         self.reset_ui_state();
         self.imgs.clear();
         self.stage = Stage::Import;
+        self.history.reset(&self.project, self.stage);
         self.status = format!("Loaded {name} ({}×{}). Review it and press “Approve & continue”.", img.width(), img.height());
         self.sync_images(ctx);
     }
@@ -215,6 +231,7 @@ impl Plot2CsvApp {
                     .copied()
                     .find(|s| self.project.status(*s) != StageStatus::Pending && self.project.can_open(*s))
                     .unwrap_or(Stage::Import);
+                self.history.reset(&self.project, self.stage);
                 self.status = "Project loaded.".into();
             }
             Err(e) => self.status = e,
@@ -395,6 +412,87 @@ impl Plot2CsvApp {
         self.status = format!("{} approved. Review the proposal for “{}”.", stage.title(), next.title());
     }
 
+    // -------------------------------------------------------------- history
+
+    /// Nothing in flux: no job running, no drag, no text field being edited.
+    fn settled(&self, ctx: &egui::Context) -> bool {
+        !self.is_busy() && !ctx.input(|i| i.pointer.any_down()) && !ctx.egui_wants_keyboard_input()
+    }
+
+    /// Record this frame's project state as an undo step if it changed.
+    fn track_history(&mut self, ctx: &egui::Context) {
+        if !self.settled(ctx) {
+            return;
+        }
+        let nudge_at = crate::stages::arrow_pressed(ctx).then(|| ctx.input(|i| i.time));
+        self.history.track(&self.project, self.stage, nudge_at);
+    }
+
+    /// Undo or redo at the start of the next frame.
+    pub fn request_history(&mut self, ctx: &egui::Context, op: HistoryOp) {
+        self.history_op = Some(op);
+        ctx.request_repaint();
+    }
+
+    /// Spelled-out shortcut (the bundled fonts have no ⌘ glyph).
+    pub fn shortcut_name(ctx: &egui::Context, op: HistoryOp) -> &'static str {
+        let mac = ctx.os() == egui::os::OperatingSystem::Mac;
+        match (op, mac) {
+            (HistoryOp::Undo, true) => "Cmd+Z",
+            (HistoryOp::Undo, false) => "Ctrl+Z",
+            (HistoryOp::Redo, true) => "Cmd+Shift+Z",
+            (HistoryOp::Redo, false) => "Ctrl+Y",
+        }
+    }
+
+    fn apply_history_op(&mut self, ctx: &egui::Context) {
+        let Some(op) = self.history_op.take() else { return };
+        if !self.settled(ctx) {
+            return;
+        }
+        let entry = match op {
+            HistoryOp::Undo => self.history.undo(&self.project, self.stage),
+            HistoryOp::Redo => self.history.redo(&self.project, self.stage),
+        };
+        match entry {
+            Some(e) => {
+                self.restore(ctx, e);
+                self.status = match op {
+                    HistoryOp::Undo => format!("Undone. Redo with {}.", Self::shortcut_name(ctx, HistoryOp::Redo)),
+                    HistoryOp::Redo => "Redone.".into(),
+                };
+            }
+            None => {
+                self.status = match op {
+                    HistoryOp::Undo => "Nothing to undo.".into(),
+                    HistoryOp::Redo => "Nothing to redo.".into(),
+                }
+            }
+        }
+    }
+
+    /// Put a history snapshot back (keeping the loaded source image) and show
+    /// the stage it was made in.
+    fn restore(&mut self, ctx: &egui::Context, e: Entry) {
+        let mut p = e.project;
+        p.source = self.project.source.take();
+        self.project = p;
+        let mut stage = e.stage;
+        while !self.project.can_open(stage) {
+            stage = stage.prev().unwrap_or(Stage::Import);
+        }
+        if stage != self.stage {
+            self.goto(ctx, stage);
+        }
+        self.correct_ui.clear_transient();
+        self.region_ui.clear_transient();
+        self.text_ui.clear_transient();
+        self.axes_ui.clear_transient();
+        self.data_ui.clear_transient();
+        self.measure.clear_transient();
+        self.resume_placing();
+    }
+
     // ------------------------------------------------------------------ UI
 
     fn menu_bar(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -425,6 +523,18 @@ impl Plot2CsvApp {
                     self.imgs.clear();
                     self.reset_ui_state();
                     self.stage = Stage::Import;
+                    self.history.reset(&self.project, self.stage);
+                }
+            });
+            ui.menu_button("Edit", |ui| {
+                let idle = !self.is_busy();
+                let undo = egui::Button::new("Undo").shortcut_text(Self::shortcut_name(ctx, HistoryOp::Undo));
+                if ui.add_enabled(idle && self.history.can_undo(), undo).clicked() {
+                    self.request_history(ctx, HistoryOp::Undo);
+                }
+                let redo = egui::Button::new("Redo").shortcut_text(Self::shortcut_name(ctx, HistoryOp::Redo));
+                if ui.add_enabled(idle && self.history.can_redo(), redo).clicked() {
+                    self.request_history(ctx, HistoryOp::Redo);
                 }
             });
             ui.menu_button("Axes", |ui| {
@@ -527,7 +637,7 @@ impl Plot2CsvApp {
             let gear = egui::Rect::from_min_size(r.right_top() + Vec2::new(-22.0, 2.0), Vec2::splat(20.0));
             let gr = ui.interact(gear, ui.scope_id().with("mag_gear"), egui::Sense::click()).on_hover_text(format!("Magnifier zoom {}× (click to change)", self.mag_zoom));
             ui.painter().rect_filled(gear, 3.0, Color32::from_white_alpha(200));
-            ui.painter().text(gear.center(), Align2::CENTER_CENTER, "⚙", egui::FontId::proportional(16.0), Color32::from_gray(60));
+            icons::paint(ui, Icon::Gear, gear.center(), 14.0, Color32::from_gray(60));
             if gr.clicked() {
                 self.mag_zoom = if self.mag_zoom >= 16.0 { 2.0 } else { self.mag_zoom * 2.0 };
             }
@@ -572,8 +682,8 @@ impl Plot2CsvApp {
             if self.stage != Stage::Export {
                 let blocker = self.approve_blocker();
                 let approved = self.project.status(self.stage) == StageStatus::Approved;
-                let label = if approved { "Continue ▸" } else { "Approve & continue ▸" };
-                let r = widgets::primary_button(ui, label, blocker.is_none() && !self.is_busy());
+                let label = if approved { "Continue" } else { "Approve & continue" };
+                let r = widgets::primary_button_trailing(ui, label, Icon::ChevronRight, blocker.is_none() && !self.is_busy());
                 if let Some(b) = &blocker {
                     r.clone().on_disabled_hover_text(b.clone());
                 }
@@ -582,10 +692,10 @@ impl Plot2CsvApp {
                 }
                 ui.horizontal(|ui| {
                     let has_auto = !matches!(self.stage, Stage::Import);
-                    if has_auto && ui.add_enabled(!self.is_busy(), egui::Button::new("↻ Re-run auto")).on_hover_text("Discard edits and run the automatic step again").clicked() {
+                    if has_auto && ui.add_enabled(!self.is_busy(), egui::Button::new((icons::image(ui, Icon::ArrowsRotate), "Re-run auto"))).on_hover_text("Discard edits and run the automatic step again").clicked() {
                         self.run_auto(ctx, self.stage);
                     }
-                    if has_auto && ui.button("⟲ Reset to auto").on_hover_text("Restore the last automatic proposal").clicked() {
+                    if has_auto && ui.button((icons::image(ui, Icon::RotateLeft), "Reset to auto")).on_hover_text("Restore the last automatic proposal").clicked() {
                         self.reset_stage_to_auto();
                     }
                 });
@@ -730,9 +840,26 @@ impl Plot2CsvApp {
         }
     }
 
-    fn global_keys(&mut self, ctx: &egui::Context) {
-        if ctx.egui_wants_keyboard_input() || self.dialog.is_some() {
+    /// `typing`: a text field had the keyboard when the frame started. Its
+    /// Enter (which also ends the editing) must not approve the stage.
+    fn global_keys(&mut self, ctx: &egui::Context, typing: bool) {
+        if typing || ctx.egui_wants_keyboard_input() || self.dialog.is_some() {
             return;
+        }
+        // Redo first: Cmd+Z also matches Cmd+Shift+Z.
+        let (redo, undo) = ctx.input_mut(|i| {
+            use egui::{Key, KeyboardShortcut as Shortcut, Modifiers};
+            let redo = i.consume_shortcut(&Shortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z))
+                || i.consume_shortcut(&Shortcut::new(Modifiers::COMMAND, Key::Y));
+            let undo = i.consume_shortcut(&Shortcut::new(Modifiers::COMMAND, Key::Z));
+            (redo, undo)
+        });
+        if !self.is_busy() {
+            if redo {
+                self.request_history(ctx, HistoryOp::Redo);
+            } else if undo {
+                self.request_history(ctx, HistoryOp::Undo);
+            }
         }
         let (plus, minus, fit, enter) = ctx.input(|i| {
             (
@@ -779,8 +906,10 @@ impl Plot2CsvApp {
 impl eframe::App for Plot2CsvApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        let typing = ctx.egui_wants_keyboard_input();
         self.run_busy(&ctx);
         self.poll_jobs(&ctx);
+        self.apply_history_op(&ctx);
         if self.busy.is_empty() {
             self.sync_images(&ctx);
         }
@@ -826,8 +955,9 @@ impl eframe::App for Plot2CsvApp {
         self.show_dialog(&ctx);
         let hold_tip = self.is_busy() || self.dialog.is_some();
         self.tips.show(&ctx, self.stage, canvas_rect, hold_tip);
-        self.global_keys(&ctx);
+        self.global_keys(&ctx, typing);
         self.busy_overlay(&ctx);
+        self.track_history(&ctx);
     }
 }
 

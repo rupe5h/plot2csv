@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::axes::Calibration;
 use crate::dataset::Dataset;
+use crate::project::{TextItem, TextRole};
 use crate::value::NumFormat;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -109,18 +110,43 @@ pub fn nearest_neighbor_order(pts: &[crate::geom::Pt]) -> Vec<usize> {
     order
 }
 
-/// Column headers for a dataset table.
-pub fn headers(cal: &Calibration) -> Vec<String> {
-    cal.variables()
+/// The plot's axis titles (the X / Y title text items), used as column headers.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AxisTitles {
+    pub x: Option<String>,
+    pub y: Option<String>,
+}
+
+impl AxisTitles {
+    pub fn from_items(items: &[TextItem]) -> Self {
+        let title = |role: TextRole| {
+            items.iter().find(|it| it.role == role).map(|it| it.text.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|t| !t.is_empty())
+        };
+        Self { x: title(TextRole::XTitle), y: title(TextRole::YTitle) }
+    }
+}
+
+/// Column headers for a dataset table: the axis titles where the plot has
+/// them (X-Y and bar charts), else the variable names.
+pub fn headers(cal: &Calibration, titles: &AxisTitles) -> Vec<String> {
+    let mut h = cal.variables();
+    if matches!(cal, Calibration::Xy(_) | Calibration::Bar(_)) {
+        for (slot, title) in h.iter_mut().zip([&titles.x, &titles.y]) {
+            if let Some(t) = title {
+                *slot = t.clone();
+            }
+        }
+    }
+    h
 }
 
 /// Format rows as delimited text.
-pub fn format_rows(cal: &Calibration, rows: &[Row], opts: &TableOptions) -> String {
+pub fn format_rows(cal: &Calibration, rows: &[Row], opts: &TableOptions, titles: &AxisTitles) -> String {
     let sep = opts.separator_str();
     let is_bar = matches!(cal, Calibration::Bar(_));
     let mut out = String::new();
     if opts.header {
-        out += &csv_join(&headers(cal), &sep);
+        out += &csv_join(&headers(cal, titles), &sep);
         out.push('\n');
     }
     for r in rows {
@@ -175,9 +201,34 @@ mod tests {
         let cal = image_cal();
         let opts = TableOptions { sort_by: SortBy::Column(0), format: NumFormat::Fixed, digits: 1, ..Default::default() };
         let r = rows(&cal, &ds, &opts);
-        assert_eq!(format_rows(&cal, &r, &opts), "1.0,2.0\n2.0,3.0\n3.0,1.0\n");
+        let none = AxisTitles::default();
+        assert_eq!(format_rows(&cal, &r, &opts, &none), "1.0,2.0\n2.0,3.0\n3.0,1.0\n");
         let opts2 = TableOptions { separator: "\\t".into(), header: true, ..opts.clone() };
-        assert_eq!(format_rows(&cal, &r, &opts2).lines().next().unwrap(), "X\tY");
+        assert_eq!(format_rows(&cal, &r, &opts2, &none).lines().next().unwrap(), "X\tY");
+    }
+
+    #[test]
+    fn axis_titles_are_headers() {
+        let mut axes = Axes::new(AxesKind::Xy, 10.0);
+        axes.points = vec![Pt::new(0.0, 0.0), Pt::new(1.0, 0.0), Pt::new(0.0, 0.0), Pt::new(0.0, -1.0)];
+        let xy = axes.calibrate().unwrap();
+        let item = |t: &str, role| TextItem {
+            bbox: crate::geom::RectF::new(0.0, 0.0, 10.0, 10.0),
+            text: t.into(),
+            conf: 1.0,
+            role,
+            value: None,
+            manual: false,
+            vertical: false,
+        };
+        let titles = AxisTitles::from_items(&[item("Frequency  [Hz]", TextRole::XTitle), item("Pseudo-acceleration [g]", TextRole::YTitle)]);
+        assert_eq!(headers(&xy, &titles), vec!["Frequency [Hz]", "Pseudo-acceleration [g]"]);
+        // Only one title: the other column keeps its variable name.
+        let x_only = AxisTitles { x: Some("Time, s".into()), y: None };
+        let opts = TableOptions { header: true, ..Default::default() };
+        assert_eq!(format_rows(&xy, &[], &opts, &x_only), "\"Time, s\",Y\n");
+        // Image axes have no titles to use.
+        assert_eq!(headers(&image_cal(), &titles), vec!["X", "Y"]);
     }
 
     #[test]

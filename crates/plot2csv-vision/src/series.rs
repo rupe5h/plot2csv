@@ -317,27 +317,51 @@ fn join_disjoint(mut tracks: Vec<Track>) -> Vec<Track> {
     out
 }
 
-/// Downsample a track to points roughly `dx` apart (averaging within each bin).
-fn track_points(t: &Track, dx: f64) -> Vec<DataPoint> {
+/// Width of the sampling bins of auto-detected curves: about 100 per panel.
+pub fn sample_step(inner: &RectF) -> f64 {
+    (0.01 * inner.width()).clamp(4.0, 20.0)
+}
+
+/// One point per `dx`-wide bin of a grid anchored at `x0`. The grid is the
+/// panel's, so every curve of a panel is sampled at the same X values and a
+/// table of all its series lines up row by row: a bin the curve covers gets a
+/// point at the bin's centre (y from a least-squares line through the bin's
+/// samples); a bin it only partly covers (an end, a gap of a dashed line)
+/// keeps the mean of its samples.
+pub fn sample_track(t: &Track, dx: f64, x0: f64) -> Vec<DataPoint> {
     let mut out = Vec::new();
-    let mut bin_start = t.first().0;
-    let (mut sx, mut sy, mut n) = (0.0, 0.0, 0.0);
-    for &(x, y) in &t.pts {
-        if x - bin_start >= dx && n > 0.0 {
-            out.push(DataPoint::new(sx / n, sy / n));
-            bin_start = x;
-            sx = 0.0;
-            sy = 0.0;
-            n = 0.0;
+    let bin_of = |x: f64| ((x - x0) / dx).floor();
+    let pts = &t.pts;
+    let mut i = 0;
+    while i < pts.len() {
+        let k = bin_of(pts[i].0);
+        let mut j = i + 1;
+        while j < pts.len() && bin_of(pts[j].0) == k {
+            j += 1;
         }
-        sx += x;
-        sy += y;
-        n += 1.0;
-    }
-    if n > 0.0 {
-        out.push(DataPoint::new(sx / n, sy / n));
+        out.push(bin_point(&pts[i..j], x0 + (k + 0.5) * dx, dx));
+        i = j;
     }
     out
+}
+
+/// The point for one bin's samples: at the bin centre `c` when they are
+/// spread around it, else their mean.
+fn bin_point(bin: &[(f64, f64)], c: f64, dx: f64) -> DataPoint {
+    let n = bin.len() as f64;
+    let mx = bin.iter().map(|p| p.0).sum::<f64>() / n;
+    let my = bin.iter().map(|p| p.1).sum::<f64>() / n;
+    let lo = bin.iter().map(|p| p.0).fold(f64::INFINITY, f64::min);
+    let hi = bin.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max);
+    // Samples on both sides of the centre, filling at least half of the bin.
+    if bin.len() >= 2 && lo <= c && c <= hi && hi - lo >= 0.5 * dx - 1.0 && (mx - c).abs() <= 0.25 * dx {
+        let sxx: f64 = bin.iter().map(|p| (p.0 - mx).powi(2)).sum();
+        let sxy: f64 = bin.iter().map(|p| (p.0 - mx) * (p.1 - my)).sum();
+        let slope = if sxx > 1e-9 { sxy / sxx } else { 0.0 };
+        DataPoint::new(c, my + slope * (c - mx))
+    } else {
+        DataPoint::new(mx, my)
+    }
 }
 
 /// The tracks of one colour as pieces of a single curve, when they are:
@@ -370,13 +394,12 @@ fn band_mask(t: &Track, w: usize, h: usize, r: f64) -> Mask {
 /// Points of one curve made of several tracks: all their samples, binned by
 /// `dx`. A bin with samples at clearly different heights (a steep flank of a
 /// spike) gives one point per height, as WebPlotDigitizer's averaging window does.
-fn union_points(tracks: &[&Track], dx: f64, sep: f64) -> Vec<DataPoint> {
+fn union_points(tracks: &[&Track], dx: f64, x0: f64, sep: f64) -> Vec<DataPoint> {
     let mut all: Vec<(f64, f64)> = tracks.iter().flat_map(|t| t.pts.iter().copied()).collect();
     if all.is_empty() {
         return Vec::new();
     }
     all.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-    let x0 = all[0].0;
     let mut out = Vec::new();
     let mut i = 0;
     while i < all.len() {
@@ -393,8 +416,7 @@ fn union_points(tracks: &[&Track], dx: f64, sep: f64) -> Vec<DataPoint> {
             while m < b.len() && b[m].1 - b[m - 1].1 <= sep {
                 m += 1;
             }
-            let n = (m - k) as f64;
-            out.push(DataPoint::new(b[k..m].iter().map(|p| p.0).sum::<f64>() / n, b[k..m].iter().map(|p| p.1).sum::<f64>() / n));
+            out.push(bin_point(&b[k..m], x0 + (bin + 0.5) * dx, dx));
             k = m;
         }
         i = j;
@@ -1115,7 +1137,9 @@ pub fn detect_series(img: &RgbaImage, panel: &Panel, items: &[TextItem], cal: Op
     };
     let along_grid = |t: &Track| t.pts.iter().filter(|p| near_grid_row(p.1)).count() as f64 > 0.6 * t.pts.len() as f64;
 
-    let dx = (0.01 * inner.width()).clamp(4.0, 20.0);
+    // Sampling grid shared by every curve of the panel.
+    let dx = sample_step(&inner);
+    let grid_x0 = inner.x0;
     let max_jump = (0.03 * inner.height()).max(6.0);
     let max_gap = (0.03 * inner.width()).max(8.0);
     let mut datasets: Vec<Dataset> = Vec::new();
@@ -1227,7 +1251,7 @@ pub fn detect_series(img: &RgbaImage, panel: &Panel, items: &[TextItem], cal: Op
                 _ => SeriesStyle::Line,
             };
             ds.points = match tracks.first() {
-                Some(t) => track_points(t, dx),
+                Some(t) => sample_track(t, dx, grid_x0),
                 None => averaging_window(&bm, dx, dx),
             };
             auto.mask = Some(match tracks.first() {
@@ -1249,7 +1273,7 @@ pub fn detect_series(img: &RgbaImage, panel: &Panel, items: &[TextItem], cal: Op
             let x0 = parts.iter().map(|t| t.first().0).fold(f64::MAX, f64::min);
             let x1 = parts.iter().map(|t| t.last().0).fold(f64::MIN, f64::max);
             ds.style = if n_pts as f64 / (x1 - x0 + 1.0) < 0.85 { SeriesStyle::Dashed } else { SeriesStyle::Line };
-            ds.points = union_points(&parts, dx, 0.5 * max_jump);
+            ds.points = union_points(&parts, dx, grid_x0, 0.5 * max_jump);
             let mut bits = vec![false; w * h];
             for t in &parts {
                 for (b, m) in bits.iter_mut().zip(band_bits(t, w, h, max_jump.max(5.0))) {
@@ -1274,7 +1298,7 @@ pub fn detect_series(img: &RgbaImage, panel: &Panel, items: &[TextItem], cal: Op
                 let mut ds = Dataset::new(format!("{} {} ({word})", base_name, k + 1));
                 ds.color = c.color;
                 ds.style = style;
-                ds.points = track_points(t, dx);
+                ds.points = sample_track(t, dx, grid_x0);
                 let mut a = auto.clone();
                 a.mask = Some(band_mask(t, w, h, (0.5 * max_jump).max(4.0)));
                 ds.auto = a;
@@ -1293,18 +1317,67 @@ pub fn detect_series(img: &RgbaImage, panel: &Panel, items: &[TextItem], cal: Op
 
 /// Attach category labels (text under each bar) to bar points.
 fn label_bars(mut pts: Vec<DataPoint>, items: &[TextItem], inner: &RectF) -> Vec<DataPoint> {
+    let cats = CategoryLabels::new(items, inner);
     for p in pts.iter_mut() {
-        let best = items
-            .iter()
-            .filter(|it| it.bbox.center().y > inner.y1 && it.value.is_none())
-            .map(|it| ((it.bbox.center().x - p.x).abs(), it))
-            .filter(|(d, it)| *d < it.bbox.width().max(20.0))
-            .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-        if let Some((_, it)) = best {
-            p.label = Some(it.text.clone());
-        }
+        p.label = cats.at(p.x);
     }
     pts
+}
+
+/// The category labels of a bar chart: the row of text right under the plot.
+/// Axis titles, numbers and the other rows are not categories, so a bar never
+/// takes the X title ("Datasets") when it is closer than the bar's own label.
+pub struct CategoryLabels<'a> {
+    row: Vec<&'a TextItem>,
+    /// Typical distance between neighbouring labels.
+    spacing: f64,
+}
+
+impl<'a> CategoryLabels<'a> {
+    pub fn new(items: &'a [TextItem], inner: &RectF) -> Self {
+        let margin = 0.05 * inner.width();
+        let below: Vec<&TextItem> = items
+            .iter()
+            .filter(|it| {
+                let c = it.bbox.center();
+                c.y > inner.y1
+                    && c.x > inner.x0 - margin
+                    && c.x < inner.x1 + margin
+                    && it.value.is_none()
+                    && !it.vertical
+                    && !it.text.trim().is_empty()
+                    && matches!(it.role, TextRole::XTick | TextRole::Other)
+            })
+            .collect();
+        // Labels classified as X ticks win; otherwise the row nearest the axis.
+        let ticks: Vec<&TextItem> = below.iter().copied().filter(|it| it.role == TextRole::XTick).collect();
+        let pool = if ticks.is_empty() { below } else { ticks };
+        let row: Vec<&TextItem> = match pool.iter().min_by(|a, b| a.bbox.center().y.total_cmp(&b.bbox.center().y)) {
+            Some(top) => {
+                let (y, h) = (top.bbox.center().y, top.bbox.height().max(6.0));
+                pool.iter().copied().filter(|it| (it.bbox.center().y - y).abs() < 0.6 * h.max(it.bbox.height())).collect()
+            }
+            None => Vec::new(),
+        };
+        let mut xs: Vec<f64> = row.iter().map(|it| it.bbox.center().x).collect();
+        xs.sort_by(f64::total_cmp);
+        let mut gaps: Vec<f64> = xs.windows(2).map(|w| w[1] - w[0]).filter(|g| *g > 1.0).collect();
+        gaps.sort_by(f64::total_cmp);
+        let spacing = gaps.get(gaps.len() / 2).copied().unwrap_or(inner.width());
+        Self { row, spacing }
+    }
+
+    /// Label of the category a bar at pixel `x` belongs to: the nearest label,
+    /// if the bar lies within its group (about half the label spacing).
+    pub fn at(&self, x: f64) -> Option<String> {
+        let (d, it) = self
+            .row
+            .iter()
+            .map(|it| ((it.bbox.center().x - x).abs(), *it))
+            .min_by(|a, b| a.0.total_cmp(&b.0))?;
+        let reach = (0.5 * it.bbox.width()).max(0.6 * self.spacing).max(20.0);
+        (d <= reach).then(|| it.text.trim().to_string())
+    }
 }
 
 #[cfg(test)]
@@ -1552,5 +1625,62 @@ mod tests {
         let r = detect_series(&img, &panel(inner), &[label], None);
         assert_eq!(r.datasets.len(), 1, "{}", r.note);
         assert!(r.datasets[0].points.iter().all(|p| p.x < 410.0), "{}", r.note);
+    }
+
+    /// Curves of one panel are sampled on one X grid: the same X values for
+    /// every series, at bin centres, with y on the curve.
+    #[test]
+    fn curves_share_the_sampling_grid() {
+        let line = |x0: usize, x1: usize, f: &dyn Fn(f64) -> f64| Track { pts: (x0..x1).map(|x| (x as f64 + 0.5, f(x as f64 + 0.5))).collect(), slope: 0.0 };
+        let a = line(106, 500, &|x| 0.3 * x + 10.0);
+        let b = line(117, 480, &|x| 200.0 - 0.1 * x);
+        let (dx, x0) = (8.0, 100.0);
+        let (pa, pb) = (sample_track(&a, dx, x0), sample_track(&b, dx, x0));
+        // Interior points sit at bin centres x0 + (k + ½)·dx, exactly on the line.
+        for p in pa[1..pa.len() - 1].iter() {
+            let k = (p.x - x0) / dx - 0.5;
+            assert!((k - k.round()).abs() < 1e-9, "x {} off the grid", p.x);
+            assert!((p.y - (0.3 * p.x + 10.0)).abs() < 1e-9);
+        }
+        let xa: std::collections::HashSet<i64> = pa[1..pa.len() - 1].iter().map(|p| (p.x * 1e6).round() as i64).collect();
+        let shared = pb[1..pb.len() - 1].iter().filter(|p| xa.contains(&((p.x * 1e6).round() as i64))).count();
+        assert_eq!(shared, pb.len() - 2, "every interior X of b is an X of a");
+        // A partly covered end bin (two samples of eight columns) keeps their mean.
+        assert!((pa[0].x - 107.0).abs() < 1e-9 && (pa[0].y - (0.3 * 107.0 + 10.0)).abs() < 1e-9, "{:?}", pa[0]);
+    }
+
+    /// Grouped bars (bar_input.png): the X title "Datasets" sits under the gap
+    /// between DS3 and DS4, closer to DS3's last bar than the DS3 label is.
+    #[test]
+    fn bar_labels_skip_the_axis_title() {
+        let inner = RectF::new(120.0, 95.0, 965.0, 595.0);
+        let text = |x0: f64, y0: f64, x1: f64, y1: f64, t: &str, role: TextRole| TextItem {
+            bbox: RectF::new(x0, y0, x1, y1),
+            text: t.into(),
+            conf: 0.9,
+            role,
+            value: None,
+            manual: false,
+            vertical: false,
+        };
+        let mut items: Vec<TextItem> = (0..6)
+            .map(|k| {
+                let cx = 192.0 + 140.0 * k as f64;
+                text(cx - 28.0, 612.0, cx + 28.0, 645.0, &format!("DS{}", k + 1), TextRole::XTick)
+            })
+            .collect();
+        items.push(text(448.0, 672.0, 640.0, 708.0, "Datasets", TextRole::XTitle));
+        // The bars of group DS3 span x = 422..512 around its label at 472.
+        let bars: Vec<DataPoint> = [422.0, 452.0, 487.0, 507.0, 512.0].iter().map(|&x| DataPoint::new(x, 300.0)).collect();
+        let labelled = label_bars(bars.clone(), &items, &inner);
+        assert!(labelled.iter().all(|p| p.label.as_deref() == Some("DS3")), "{:?}", labelled);
+        // Also when the title was not recognised as one.
+        items.last_mut().unwrap().role = TextRole::Other;
+        let labelled = label_bars(bars, &items, &inner);
+        assert!(labelled.iter().all(|p| p.label.as_deref() == Some("DS3")), "{:?}", labelled);
+        // First and last groups reach out to their outermost bars.
+        let cats = CategoryLabels::new(&items, &inner);
+        assert_eq!(cats.at(135.0).as_deref(), Some("DS1"));
+        assert_eq!(cats.at(955.0).as_deref(), Some("DS6"));
     }
 }

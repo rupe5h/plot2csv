@@ -1,6 +1,6 @@
 //! Zoomable, pannable image canvas with image<->screen transforms.
 
-use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, TextureHandle, Vec2};
+use egui::{Color32, CursorIcon, Pos2, Rect, Response, Sense, Stroke, TextureHandle, Vec2};
 
 #[derive(Clone, Debug)]
 pub struct ImageCanvas {
@@ -27,6 +27,8 @@ pub struct CanvasView {
     origin: Pos2,
     /// Image coordinates under the pointer, if hovering.
     pub hover: Option<Pos2>,
+    /// A drag (or held Space) moves the view this frame: the hand cursor stays.
+    panning: bool,
 }
 
 impl CanvasView {
@@ -38,6 +40,14 @@ impl CanvasView {
     }
     pub fn rect_to_screen(&self, r: Rect) -> Rect {
         Rect::from_min_max(self.to_screen(r.min), self.to_screen(r.max))
+    }
+
+    /// Show `icon` as the pointer over the canvas, telling what a click or
+    /// drag does there. Panning keeps its hand cursor.
+    pub fn set_cursor(&self, icon: CursorIcon) {
+        if !self.panning && (self.response.hovered() || self.response.dragged()) {
+            self.response.ctx.set_cursor_icon(icon);
+        }
     }
 }
 
@@ -96,11 +106,18 @@ impl ImageCanvas {
                 self.offset += response.drag_delta();
             }
         }
-        if response.dragged_by(egui::PointerButton::Middle)
-            || response.dragged_by(egui::PointerButton::Secondary)
-            || (primary_drag_pans && response.dragged_by(egui::PointerButton::Primary))
-        {
+        let other_drag = response.dragged_by(egui::PointerButton::Middle) || response.dragged_by(egui::PointerButton::Secondary);
+        if other_drag || (primary_drag_pans && response.dragged_by(egui::PointerButton::Primary)) {
             self.offset += response.drag_delta();
+        }
+        // Hand cursor where a left-drag pans (open hand; closed while dragging).
+        let space = response.hovered() && ui.input(|i| i.key_down(egui::Key::Space));
+        let primary_pans = (primary_drag_pans || space) && tex.is_some();
+        let panning = other_drag || space || (primary_pans && response.dragged_by(egui::PointerButton::Primary));
+        if other_drag || (primary_pans && response.dragged_by(egui::PointerButton::Primary)) {
+            ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+        } else if primary_pans && response.hovered() {
+            ui.ctx().set_cursor_icon(CursorIcon::Grab);
         }
 
         let origin = rect.min + self.offset;
@@ -111,6 +128,6 @@ impl ImageCanvas {
             painter.rect_stroke(img_rect, 0.0, Stroke::new(1.0, Color32::from_gray(90)), egui::StrokeKind::Outside);
         }
         let hover = response.hover_pos().map(|p| ((p - origin) / self.zoom).to_pos2());
-        CanvasView { response, rect, zoom: self.zoom, origin, hover }
+        CanvasView { response, rect, zoom: self.zoom, origin, hover, panning }
     }
 }

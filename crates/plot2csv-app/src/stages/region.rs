@@ -1,11 +1,12 @@
 //! ③ Plot area: one or more panels with an inner (data) box and an outer (labels) box.
 
-use egui::{Color32, Pos2, Rect, Stroke, StrokeKind};
+use egui::{Color32, CursorIcon, Pos2, Rect, Stroke, StrokeKind};
 use plot2csv_core::axes::AxesKind;
 use plot2csv_core::geom::RectF;
 use plot2csv_core::project::{Panel, Stage};
 
 use crate::app::Plot2CsvApp;
+use crate::icons::{self, Icon};
 use crate::canvas::CanvasView;
 use crate::widgets;
 
@@ -37,6 +38,16 @@ pub struct RegionUi {
     draw_cur: Option<Pos2>,
 }
 
+impl RegionUi {
+    /// Drop the selection, drag and a half-drawn box (after undo/redo).
+    pub fn clear_transient(&mut self) {
+        self.selected = None;
+        self.drag = None;
+        self.draw_start = None;
+        self.draw_cur = None;
+    }
+}
+
 pub fn to_rect(r: &RectF) -> Rect {
     Rect::from_min_max(Pos2::new(r.x0 as f32, r.y0 as f32), Pos2::new(r.x1 as f32, r.y1 as f32))
 }
@@ -60,6 +71,18 @@ fn hit(r: Rect, p: Pos2, tol: f32) -> Option<Handle> {
         (_, _, _, true) => Handle::B,
         _ => Handle::Move,
     })
+}
+
+/// Pointer that tells what dragging a handle does.
+fn handle_cursor(h: Handle, dragging: bool) -> CursorIcon {
+    match h {
+        Handle::Move if dragging => CursorIcon::Grabbing,
+        Handle::Move => CursorIcon::Grab,
+        Handle::L | Handle::R => CursorIcon::ResizeHorizontal,
+        Handle::T | Handle::B => CursorIcon::ResizeVertical,
+        Handle::TL | Handle::BR => CursorIcon::ResizeNwSe,
+        Handle::TR | Handle::BL => CursorIcon::ResizeNeSw,
+    }
 }
 
 fn apply_handle(r: &mut RectF, h: Handle, d: (f64, f64)) {
@@ -150,7 +173,7 @@ impl Plot2CsvApp {
                         if r.gained_focus() {
                             new_sel = Some(p.id);
                         }
-                        if ui.small_button("🗑").on_hover_text("Delete this panel").clicked() {
+                        if ui.small_button(icons::image(ui, Icon::TrashCan)).on_hover_text("Delete this panel").clicked() {
                             delete = Some(p.id);
                         }
                         if ui.selectable_label(sel, "select").clicked() {
@@ -186,7 +209,11 @@ impl Plot2CsvApp {
         }
         self.region_ui.selected = new_sel;
         ui.add_space(4.0);
-        let draw_label = if self.region_ui.drawing { "Drawing… (drag on the image)" } else { "＋ Draw a new plot area" };
+        let draw_label = if self.region_ui.drawing {
+            egui::Atoms::new("Drawing… (drag on the image)")
+        } else {
+            egui::Atoms::new((icons::image(ui, Icon::Plus), "Draw a new plot area"))
+        };
         if ui.selectable_label(self.region_ui.drawing, draw_label).clicked() {
             self.region_ui.drawing = !self.region_ui.drawing;
         }
@@ -246,6 +273,7 @@ impl Plot2CsvApp {
         let resp = &view.response;
         let pointer = resp.interact_pointer_pos();
         if self.region_ui.drawing {
+            view.set_cursor(CursorIcon::Crosshair);
             if resp.drag_started_by(egui::PointerButton::Primary) {
                 self.region_ui.draw_start = pointer.map(|p| view.to_image(p));
             }
@@ -274,23 +302,36 @@ impl Plot2CsvApp {
             }
             return;
         }
-        if resp.drag_started_by(egui::PointerButton::Primary) {
-            if let Some(p) = pointer {
-                // Selected panel first, inner before outer.
-                let mut order: Vec<&Panel> = panels.iter().collect();
-                order.sort_by_key(|q| if Some(q.id) == self.region_ui.selected { 0 } else { 1 });
-                'find: for q in order {
-                    for which in [Which::Inner, Which::Outer] {
-                        let r = if which == Which::Inner { &q.inner } else { &q.outer };
-                        let sr = view.rect_to_screen(to_rect(r));
-                        if let Some(h) = hit(sr, p, 8.0) {
-                            let h = if which == Which::Outer && h == Handle::Move { continue } else { h };
-                            self.region_ui.drag = Some((q.id, which, h));
-                            self.region_ui.selected = Some(q.id);
-                            break 'find;
-                        }
+        // The handle under a screen position: selected panel first, inner before outer.
+        let selected = self.region_ui.selected;
+        let handle_at = |p: Pos2| -> Option<(u32, Which, Handle)> {
+            let mut order: Vec<&Panel> = panels.iter().collect();
+            order.sort_by_key(|q| if Some(q.id) == selected { 0 } else { 1 });
+            for q in order {
+                for which in [Which::Inner, Which::Outer] {
+                    let r = if which == Which::Inner { &q.inner } else { &q.outer };
+                    match hit(view.rect_to_screen(to_rect(r)), p, 8.0) {
+                        Some(Handle::Move) if which == Which::Outer => {}
+                        Some(h) => return Some((q.id, which, h)),
+                        None => {}
                     }
                 }
+            }
+            None
+        };
+        // Pointer: what a drag from here does (resize an edge or corner, move the panel).
+        match self.region_ui.drag {
+            Some((_, _, h)) => view.set_cursor(handle_cursor(h, true)),
+            None => {
+                if let Some((_, _, h)) = resp.hover_pos().and_then(handle_at) {
+                    view.set_cursor(handle_cursor(h, false));
+                }
+            }
+        }
+        if resp.drag_started_by(egui::PointerButton::Primary) {
+            if let Some((id, which, h)) = pointer.and_then(handle_at) {
+                self.region_ui.drag = Some((id, which, h));
+                self.region_ui.selected = Some(id);
             }
         }
         if let Some((id, which, h)) = self.region_ui.drag {

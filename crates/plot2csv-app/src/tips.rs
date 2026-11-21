@@ -8,6 +8,7 @@
 use egui::{Align2, RichText, Vec2};
 use plot2csv_core::project::Stage;
 
+use crate::icons::{self, Icon};
 use crate::{platform, widgets};
 
 const STORAGE_KEY: &str = "plot2csv.tipsSeen";
@@ -15,6 +16,7 @@ const CARD_WIDTH: f32 = 330.0;
 
 struct StageTip {
     goal: &'static str,
+    /// `{icon-name}` tokens are drawn as icons (see [`icons::rich_label`]).
     steps: &'static [&'static str],
 }
 
@@ -23,7 +25,7 @@ fn tip(stage: Stage) -> StageTip {
         Stage::Import => StageTip {
             goal: "Bring in the plot you want to turn into numbers.",
             steps: &[
-                "Load an image with 📂 Load Image…, drop it on the window, or paste it with Ctrl+V.",
+                "Load an image with {folder-open} Load Image…, drop it on the window, or paste it with Ctrl+V.",
                 "For a phone photo of a printed plot, tick “Enhance photo” to even out the lighting.",
                 "To resume earlier work, use Import Project… with a saved .plot2csv.json file.",
             ],
@@ -32,15 +34,15 @@ fn tip(stage: Stage) -> StageTip {
             goal: "Straighten the image so the plot's axes run horizontally and vertically.",
             steps: &[
                 "The blue note on the right says what was detected. If the image is already straight, there is nothing to do.",
-                "Otherwise, drag the blue frame's TL / TR / BR / BL corners onto the plot frame, or use the Rotate slider or ⟳ Rotate 90°.",
-                "Check the result with 👁 Preview result.",
+                "Otherwise, drag the blue frame's TL / TR / BR / BL corners onto the plot frame, or use the Rotate slider or {rotate-right} Rotate 90°.",
+                "Check the result with {eye} Preview result.",
             ],
         },
         Stage::Region => StageTip {
             goal: "Mark where each plot sits in the image.",
             steps: &[
                 "Blue box: the data area inside the axes. Grey dashed box: the same area plus tick labels and titles.",
-                "Drag the box edges to fit. Use ＋ Draw a new plot area for extra panels.",
+                "Drag the box edges to fit. Use {plus} Draw a new plot area for extra panels.",
                 "Set each panel's Type, and untick any panel you don't want to digitize.",
             ],
         },
@@ -49,7 +51,7 @@ fn tip(stage: Stage) -> StageTip {
             steps: &[
                 "Each box on the image is text found by OCR. Click a box to select it.",
                 "Fix misread text and set its Role in the list. Make sure the tick values are right.",
-                "Missed a label? Press ＋ Read text in a box and drag around it.",
+                "Missed a label? Press {plus} Read text in a box and drag around it.",
             ],
         },
         Stage::Axes => StageTip {
@@ -64,15 +66,15 @@ fn tip(stage: Stage) -> StageTip {
         Stage::Data => StageTip {
             goal: "Extract the data series from the plot.",
             steps: &[
-                "Automatic Mode: pick the series colour with 🖊 Pick and choose an Algorithm. Use Mask to limit where it looks; painting over a curve with the Pen also takes its colour.",
+                "Automatic Mode: pick the series colour with {eye-dropper} Pick and choose an Algorithm. Use Mask to limit where it looks; painting over a curve with the Pen also takes its colour.",
                 "Manual Mode: click on the curve to add points. Keys: A add, S adjust, D delete.",
-                "Add a dataset for each series with ＋ Add dataset. Check the values with View Data.",
+                "Add a dataset for each series with {plus} Add dataset. Check the values with View Data.",
             ],
         },
         Stage::Export => StageTip {
             goal: "Download the extracted data.",
             steps: &[
-                "⬇ Download all (ZIP) gives one CSV per series, combined CSVs and the project file.",
+                "{download} Download all (ZIP) gives one CSV per series, combined CSVs and the project file.",
                 "Long CSV and Wide CSV each download a single combined table.",
                 "Tick “Show re-plotted data” to compare the result with the original image.",
                 "Project (JSON) saves everything so you can come back to it later.",
@@ -156,7 +158,7 @@ impl Tips {
                         ui.label(RichText::new("TIP").small().strong().color(widgets::INFO));
                         ui.label(RichText::new(format!("{} {}", widgets::STAGE_NUMS[s.index()], s.title())).strong().size(16.0));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            dismiss |= ui.small_button("✕").on_hover_text("Close this tip").clicked();
+                            dismiss |= ui.small_button(icons::image(ui, Icon::Xmark)).on_hover_text("Close this tip").clicked();
                         });
                     });
                     ui.add_space(2.0);
@@ -165,12 +167,13 @@ impl Tips {
                     for step in t.steps {
                         ui.horizontal_top(|ui| {
                             ui.label("•");
-                            ui.add(egui::Label::new(*step).wrap());
+                            icons::rich_label(ui, step, egui::TextStyle::Body, ui.visuals().text_color());
                         });
                     }
                     if s != Stage::Export {
                         ui.add_space(2.0);
-                        ui.label(RichText::new("When it looks right, press Approve & continue ▸ (or Enter).").weak());
+                        let weak = ui.visuals().weak_text_color();
+                        icons::rich_label(ui, "When it looks right, press Approve & continue {chevron-right} (or Enter).", egui::TextStyle::Body, weak);
                     }
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {

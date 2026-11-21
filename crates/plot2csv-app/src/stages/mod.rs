@@ -28,6 +28,11 @@ pub fn pos(p: Pt) -> Pos2 {
     Pos2::new(p.x as f32, p.y as f32)
 }
 
+/// Was an arrow key pressed this frame (a nudge, outside text fields)?
+pub fn arrow_pressed(ctx: &egui::Context) -> bool {
+    arrow_nudge(ctx).is_some()
+}
+
 /// Arrow-key nudge in image pixels (Shift = 10×). Returns None when no arrow is pressed.
 pub fn arrow_nudge(ctx: &egui::Context) -> Option<egui::Vec2> {
     if ctx.egui_wants_keyboard_input() {

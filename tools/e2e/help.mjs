@@ -12,8 +12,8 @@ const b = await launch({ width: 1400, height: 900 });
 const esc = () => b.key("Escape", "Escape");
 const booted = "!!globalThis.wpApp && !document.getElementById('wp_loading')";
 // Help menu and its items at 1400x900.
-const help = async () => { await b.click(246, 12); await sleep(300); };
-const item = async (y) => { await b.click(270, y); await sleep(400); };
+const help = async () => { await b.click(288, 12); await sleep(300); };
+const item = async (y) => { await b.click(312, y); await sleep(400); };
 const [SHORTCUTS, DOWNLOAD, LICENCES] = [61, 92, 115];
 try {
   await b.send("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: dl });

@@ -19,9 +19,12 @@ native-ocr = ["plot2csv-ocr/native-ocr"]
 plot2csv-core.workspace = true
 plot2csv-vision.workspace = true
 plot2csv-ocr.workspace = true
-eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts"] }
+# No `default_fonts`: src/fonts.rs bundles subset Inter + Hack instead.
+eframe = { version = "0.37", default-features = false, features = ["glow"] }
 egui = "0.37"
 egui_plot = "0.38"
+# Rasterizes the Font Awesome SVG icons (src/icons.rs). epaint already links it to draw glyphs.
+vello_cpu = { version = "0.2", default-features = false, features = ["std"] }
 image.workspace = true
 serde.workspace = true
 serde_json.workspace = true

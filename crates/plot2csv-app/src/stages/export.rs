@@ -4,12 +4,13 @@ use egui::{Color32, Stroke};
 use egui_plot::{HoverPosition, Line, Plot, PlotPoints, Points};
 use plot2csv_core::axes::Calibration;
 use plot2csv_core::dataset::Dataset;
-use plot2csv_core::export::{export_zip, long_csv, series_csv, wide_csv, SeriesRef};
-use plot2csv_core::table::{format_rows, rows, SortBy};
+use plot2csv_core::export::{export_zip, long_csv, sanitize_filename, series_csv, wide_csv, SeriesRef};
+use plot2csv_core::table::{format_rows, headers, rows, AxisTitles, SortBy, TableOptions};
 use plot2csv_core::NumFormat;
 
 use super::pos;
 use crate::app::Plot2CsvApp;
+use crate::icons::Icon;
 use crate::canvas::CanvasView;
 use crate::log_axis;
 use crate::platform;
@@ -17,15 +18,34 @@ use crate::widgets::{self, c32};
 
 #[derive(Default)]
 pub struct ExportUi {
-    /// (panel id, dataset index)
-    pub sel: Option<(u32, usize)>,
+    /// Panel id and dataset index shown in the Acquired Data table; `None`: all series of the panel.
+    pub sel: Option<(u32, Option<usize>)>,
     pub plot_preview: bool,
 }
 
-/// Every dataset with a usable calibration: (panel id, panel name, calibration, dataset).
-pub type SeriesOwned = (u32, String, Calibration, Dataset);
+/// A dataset with what its export needs: panel, calibration and the axis titles.
+#[derive(Clone)]
+pub struct SeriesOwned {
+    pub panel_id: u32,
+    pub panel: String,
+    pub cal: Calibration,
+    pub ds: Dataset,
+    pub titles: AxisTitles,
+}
+
+impl SeriesOwned {
+    pub fn as_ref(&self) -> SeriesRef<'_> {
+        SeriesRef { panel: &self.panel, cal: &self.cal, ds: &self.ds, titles: &self.titles }
+    }
+}
+
+/// Bar charts are always exported with every series as a column.
+fn all_columns_only(cal: &Calibration) -> bool {
+    matches!(cal, Calibration::Bar(_))
+}
 
 impl Plot2CsvApp {
+    /// Every dataset of the enabled panels, with a usable calibration (pixels if none).
     pub fn all_series(&self) -> Vec<SeriesOwned> {
         let mut out = Vec::new();
         for p in self.project.panel_list().iter().filter(|p| p.enabled) {
@@ -36,8 +56,9 @@ impl Plot2CsvApp {
                 .as_ref()
                 .and_then(|a| a.calibrate().ok())
                 .unwrap_or_else(|| plot2csv_core::Axes::new(plot2csv_core::AxesKind::Image, 0.0).calibrate().unwrap());
+            let titles = AxisTitles::from_items(w.text.value.as_deref().unwrap_or_default());
             for d in w.data.value.iter().flatten() {
-                out.push((p.id, p.name.clone(), cal.clone(), d.clone()));
+                out.push(SeriesOwned { panel_id: p.id, panel: p.name.clone(), cal: cal.clone(), ds: d.clone(), titles: titles.clone() });
             }
         }
         out
@@ -53,7 +74,7 @@ impl Plot2CsvApp {
 
     pub fn export_zip(&mut self) {
         let all = self.all_series();
-        let refs: Vec<SeriesRef> = all.iter().map(|(_, n, c, d)| SeriesRef { panel: n, cal: c, ds: d }).collect();
+        let refs: Vec<SeriesRef> = all.iter().map(SeriesOwned::as_ref).collect();
         let json = self.project.to_json();
         match export_zip(&refs, &self.table_opts, Some(&json)) {
             Ok(z) => {
@@ -64,6 +85,11 @@ impl Plot2CsvApp {
         }
     }
 
+    /// All series of one panel side by side (X-Y, bars), or in long format (other plot types).
+    fn all_series_table(series: &[SeriesRef], opts: &TableOptions) -> String {
+        wide_csv(series, opts).unwrap_or_else(|| long_csv(series, opts))
+    }
+
     /// The Acquired Data table (used by the Export stage and the View Data dialog).
     pub fn acquired_data_ui(&mut self, ui: &mut egui::Ui) {
         let all = self.all_series();
@@ -71,61 +97,94 @@ impl Plot2CsvApp {
             ui.label("No data yet.");
             return;
         }
-        // Default selection: active panel's active dataset.
-        let default_sel = self.project.active_panel.map(|id| (id, self.active_ds_index()));
-        let mut sel = self.export_ui.sel.or(default_sel).unwrap_or((all[0].0, 0));
-        if !all.iter().any(|s| s.0 == sel.0) {
-            sel = (all[0].0, 0);
+        let mut panels: Vec<(u32, String, bool)> = Vec::new();
+        for s in &all {
+            if !panels.iter().any(|p| p.0 == s.panel_id) {
+                panels.push((s.panel_id, s.panel.clone(), all_columns_only(&s.cal)));
+            }
         }
-        let in_panel: Vec<&SeriesOwned> = all.iter().filter(|s| s.0 == sel.0).collect();
-        sel.1 = sel.1.min(in_panel.len().saturating_sub(1));
-        let multi_panel = all.iter().map(|s| s.0).collect::<std::collections::HashSet<_>>().len() > 1;
+        let multi_panel = panels.len() > 1;
+        // Default selection: the active panel's active dataset (bar charts: all series).
+        let active = self.project.active_panel.filter(|id| panels.iter().any(|p| p.0 == *id)).unwrap_or(panels[0].0);
+        let mut sel = self.export_ui.sel.unwrap_or((active, Some(self.active_ds_index())));
+        let Some(&(_, _, bars)) = panels.iter().find(|p| p.0 == sel.0).or(panels.first()) else { return };
+        if !panels.iter().any(|p| p.0 == sel.0) {
+            sel = (panels[0].0, Some(0));
+        }
+        let in_panel: Vec<&SeriesOwned> = all.iter().filter(|s| s.panel_id == sel.0).collect();
+        sel.1 = if bars { None } else { sel.1.map(|i| i.min(in_panel.len().saturating_sub(1))) };
+        let panel_prefix = |name: &str| if multi_panel { format!("{name} / ") } else { String::new() };
         ui.horizontal(|ui| {
             ui.label("Dataset:");
-            let cur = in_panel.get(sel.1).map(|s| if multi_panel { format!("{} / {}", s.1, s.3.name) } else { s.3.name.clone() }).unwrap_or_default();
+            let cur = match sel.1 {
+                None => format!("{}All series", panel_prefix(&in_panel[0].panel)),
+                Some(i) => in_panel.get(i).map(|s| format!("{}{}", panel_prefix(&s.panel), s.ds.name)).unwrap_or_default(),
+            };
             egui::ComboBox::from_id_salt("acq_ds").selected_text(cur).width(200.0).show_ui(ui, |ui| {
-                let mut idx_in_panel = std::collections::HashMap::new();
-                for s in &all {
-                    let k = idx_in_panel.entry(s.0).or_insert(0usize);
-                    let label = if multi_panel { format!("{} / {}", s.1, s.3.name) } else { s.3.name.clone() };
-                    if ui.selectable_label(sel == (s.0, *k), label).clicked() {
-                        sel = (s.0, *k);
+                for (pid, pname, bars) in &panels {
+                    let n = all.iter().filter(|s| s.panel_id == *pid).count();
+                    let all_label = format!("{}All series ({n})", panel_prefix(pname));
+                    if ui.selectable_label(sel == (*pid, None), all_label).on_hover_text("Every series of the panel as a column").clicked() {
+                        sel = (*pid, None);
                     }
-                    *k += 1;
+                    if *bars {
+                        continue;
+                    }
+                    for (k, s) in all.iter().filter(|s| s.panel_id == *pid).enumerate() {
+                        if ui.selectable_label(sel == (*pid, Some(k)), format!("{}{}", panel_prefix(pname), s.ds.name)).clicked() {
+                            sel = (*pid, Some(k));
+                        }
+                    }
                 }
             });
         });
         self.export_ui.sel = Some(sel);
-        let all_in_panel: Vec<SeriesOwned> = all.iter().filter(|s| s.0 == sel.0).cloned().collect();
-        let Some((_, pname, cal, ds)) = all_in_panel.get(sel.1).cloned() else { return };
-        let vars = cal.variables();
-        ui.label(format!("Variables: {}", vars.join(", ")));
+        let in_panel: Vec<SeriesOwned> = all.iter().filter(|s| s.panel_id == sel.0).cloned().collect();
+        let Some(first) = in_panel.first().cloned() else { return };
+        let one = sel.1.and_then(|i| in_panel.get(i).cloned());
+        let cal = first.cal.clone();
+        let vars = headers(&cal, &first.titles);
+        match (&one, &cal) {
+            (Some(_), _) => ui.label(format!("Columns: {}", vars.join(", "))),
+            (None, Calibration::Xy(_) | Calibration::Bar(_)) => ui.label(format!("Columns: {}, then one per series", vars[0])),
+            (None, _) => ui.label(format!("Columns: panel, series, {}", vars.join(", "))),
+        };
+        if one.is_none() {
+            let how = match cal {
+                Calibration::Bar(_) => "Bar chart: one row per category, one column per series.",
+                Calibration::Xy(_) => "One row for every X value of any series, so no point is left out; each series is interpolated linearly between its own points at the others' X values (empty outside its range).",
+                _ => "Every series in turn: panel, series, values.",
+            };
+            ui.label(egui::RichText::new(how).weak().small());
+        }
         let opts = &mut self.table_opts;
         egui::Grid::new("acq_opts").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-            ui.label(egui::RichText::new("Sort by").strong());
-            ui.horizontal(|ui| {
-                let label = match opts.sort_by {
-                    SortBy::Raw => "Raw".to_string(),
-                    SortBy::Column(c) => vars.get(c + usize::from(matches!(cal, Calibration::Bar(_)))).cloned().unwrap_or_default(),
-                    SortBy::NearestNeighbor => "Nearest Neighbor".into(),
-                };
-                egui::ComboBox::from_id_salt("sortby").selected_text(label).show_ui(ui, |ui| {
-                    ui.selectable_value(&mut opts.sort_by, SortBy::Raw, "Raw");
-                    let ncols = cal.to_data(plot2csv_core::geom::Pt::default()).len();
-                    for c in 0..ncols {
-                        let name = vars.get(c + usize::from(matches!(cal, Calibration::Bar(_)))).cloned().unwrap_or_default();
-                        ui.selectable_value(&mut opts.sort_by, SortBy::Column(c), name);
-                    }
-                    ui.selectable_value(&mut opts.sort_by, SortBy::NearestNeighbor, "Nearest Neighbor");
-                });
-                ui.add_enabled_ui(matches!(opts.sort_by, SortBy::Column(_)), |ui| {
-                    egui::ComboBox::from_id_salt("order").selected_text(if opts.ascending { "Ascending" } else { "Descending" }).show_ui(ui, |ui| {
-                        ui.selectable_value(&mut opts.ascending, true, "Ascending");
-                        ui.selectable_value(&mut opts.ascending, false, "Descending");
+            if one.is_some() {
+                ui.label(egui::RichText::new("Sort by").strong());
+                ui.horizontal(|ui| {
+                    let col_name = |c: usize| vars.get(c + usize::from(matches!(cal, Calibration::Bar(_)))).cloned().unwrap_or_default();
+                    let label = match opts.sort_by {
+                        SortBy::Raw => "Raw".to_string(),
+                        SortBy::Column(c) => col_name(c),
+                        SortBy::NearestNeighbor => "Nearest Neighbor".into(),
+                    };
+                    egui::ComboBox::from_id_salt("sortby").selected_text(label).show_ui(ui, |ui| {
+                        ui.selectable_value(&mut opts.sort_by, SortBy::Raw, "Raw");
+                        let ncols = cal.to_data(plot2csv_core::geom::Pt::default()).len();
+                        for c in 0..ncols {
+                            ui.selectable_value(&mut opts.sort_by, SortBy::Column(c), col_name(c));
+                        }
+                        ui.selectable_value(&mut opts.sort_by, SortBy::NearestNeighbor, "Nearest Neighbor");
+                    });
+                    ui.add_enabled_ui(matches!(opts.sort_by, SortBy::Column(_)), |ui| {
+                        egui::ComboBox::from_id_salt("order").selected_text(if opts.ascending { "Ascending" } else { "Descending" }).show_ui(ui, |ui| {
+                            ui.selectable_value(&mut opts.ascending, true, "Ascending");
+                            ui.selectable_value(&mut opts.ascending, false, "Descending");
+                        });
                     });
                 });
-            });
-            ui.end_row();
+                ui.end_row();
+            }
             ui.label(egui::RichText::new("Format").strong());
             ui.horizontal(|ui| {
                 ui.label("Digits");
@@ -140,12 +199,15 @@ impl Plot2CsvApp {
             ui.label("Separator");
             ui.horizontal(|ui| {
                 ui.add(egui::TextEdit::singleline(&mut opts.separator).desired_width(40.0)).on_hover_text("Use \\t for a tab");
-                ui.checkbox(&mut opts.header, "Header row");
+                ui.checkbox(&mut opts.header, "Header row").on_hover_text("Axis titles (and series names) as column headers");
             });
             ui.end_row();
         });
-        let r = rows(&cal, &ds, &self.table_opts);
-        let mut text = format_rows(&cal, &r, &self.table_opts);
+        let refs: Vec<SeriesRef> = in_panel.iter().map(SeriesOwned::as_ref).collect();
+        let mut text = match &one {
+            Some(s) => format_rows(&s.cal, &rows(&s.cal, &s.ds, &self.table_opts), &self.table_opts, &s.titles),
+            None => Self::all_series_table(&refs, &self.table_opts),
+        };
         ui.add(
             egui::TextEdit::multiline(&mut text)
                 .font(egui::TextStyle::Monospace)
@@ -158,14 +220,16 @@ impl Plot2CsvApp {
                 ui.ctx().copy_text(text.clone());
                 self.status = "Copied to clipboard.".into();
             }
-            if ui.button("Download .CSV").clicked() {
-                let refd = SeriesRef { panel: &pname, cal: &cal, ds: &ds };
-                let csv = if self.table_opts.header { text.clone() } else { series_csv(&refd, &self.table_opts) };
-                let name = format!(
-                    "{}_{}.csv",
-                    plot2csv_core::export::sanitize_filename(&self.base_name()),
-                    plot2csv_core::export::sanitize_filename(&ds.name)
-                );
+            if ui.button("Download .CSV").on_hover_text("With the header row").clicked() {
+                let base = sanitize_filename(&self.base_name());
+                let (name, csv) = match &one {
+                    Some(s) => (format!("{base}_{}.csv", sanitize_filename(&s.ds.name)), series_csv(&s.as_ref(), &self.table_opts)),
+                    None => {
+                        let suffix = if multi_panel { format!("{}_all_series", sanitize_filename(&first.panel)) } else { "all_series".into() };
+                        let o = TableOptions { header: true, ..self.table_opts.clone() };
+                        (format!("{base}_{suffix}.csv"), Self::all_series_table(&refs, &o))
+                    }
+                };
                 platform::save_file(&name, csv.into_bytes());
             }
         });
@@ -176,17 +240,21 @@ impl Plot2CsvApp {
         let all = self.all_series();
         ui.label(egui::RichText::new(format!("{} series in {} panel(s).", all.len(), self.project.panel_list().iter().filter(|p| p.enabled).count())).weak());
         ui.horizontal_wrapped(|ui| {
-            if widgets::primary_button(ui, "⬇ Download all (ZIP)", !all.is_empty()).on_hover_text("One CSV per series, a combined long CSV, wide CSVs and the project").clicked() {
+            if widgets::primary_button_icon(ui, Icon::Download, "Download all (ZIP)", !all.is_empty()).on_hover_text("One CSV per series, a combined long CSV, wide CSVs and the project").clicked() {
                 self.export_zip();
             }
             if ui.add_enabled(!all.is_empty(), egui::Button::new("Long CSV")).on_hover_text("panel, series, values").clicked() {
-                let refs: Vec<SeriesRef> = all.iter().map(|(_, n, c, d)| SeriesRef { panel: n, cal: c, ds: d }).collect();
-                platform::save_file(&format!("{}_all_series.csv", self.base_name()), long_csv(&refs, &self.table_opts).into_bytes());
+                let refs: Vec<SeriesRef> = all.iter().map(SeriesOwned::as_ref).collect();
+                platform::save_file(&format!("{}_all_series_long.csv", self.base_name()), long_csv(&refs, &self.table_opts).into_bytes());
             }
             let pid = self.project.active_panel;
-            let panel_refs: Vec<SeriesRef> = all.iter().filter(|s| Some(s.0) == pid).map(|(_, n, c, d)| SeriesRef { panel: n, cal: c, ds: d }).collect();
-            let wide = wide_csv(&panel_refs, &self.table_opts);
-            if ui.add_enabled(wide.is_some(), egui::Button::new("Wide CSV")).on_hover_text("Shared X column; other series interpolated (X-Y plots)").clicked() {
+            let panel_refs: Vec<SeriesRef> = all.iter().filter(|s| Some(s.panel_id) == pid).map(SeriesOwned::as_ref).collect();
+            let wide = wide_csv(&panel_refs, &TableOptions { header: true, ..self.table_opts.clone() });
+            if ui
+                .add_enabled(wide.is_some(), egui::Button::new("Wide CSV"))
+                .on_hover_text("One column per series: a shared X column with the series interpolated (X-Y plots), or one row per category (bar charts)")
+                .clicked()
+            {
                 if let Some(w) = wide {
                     platform::save_file(&format!("{}_wide.csv", self.base_name()), w.into_bytes());
                 }
@@ -205,14 +273,23 @@ impl Plot2CsvApp {
         if self.export_ui.plot_preview {
             let all = self.all_series();
             let pid = self.project.active_panel;
-            let series: Vec<&SeriesOwned> = all.iter().filter(|s| Some(s.0) == pid).collect();
+            let series: Vec<&SeriesOwned> = all.iter().filter(|s| Some(s.panel_id) == pid).collect();
             // Datasets of a panel share its calibration, so its log axes apply to all of them.
-            let (log_x, log_y) = series.first().map(|s| preview_log_axes(&s.2)).unwrap_or_default();
+            let (log_x, log_y) = series.first().map(|s| preview_log_axes(&s.cal)).unwrap_or_default();
             let rect = view.rect;
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
             child.painter().rect_filled(rect, 0.0, child.visuals().panel_fill);
             // A separate id per scale so a remembered (panned) view isn't reused in the other space.
             let mut plot = Plot::new(("preview", log_x, log_y)).legend(egui_plot::Legend::default());
+            if let Some(s) = series.first().filter(|s| matches!(s.cal, Calibration::Xy(_) | Calibration::Bar(_))) {
+                let [x, y] = [&s.titles.x, &s.titles.y];
+                if let (Some(x), false) = (x, matches!(s.cal, Calibration::Bar(_))) {
+                    plot = plot.x_axis_label(x.clone());
+                }
+                if let Some(y) = y {
+                    plot = plot.y_axis_label(y.clone());
+                }
+            }
             if log_x {
                 plot = plot.x_grid_spacer(log_axis::grid_marks).x_axis_formatter(log_axis::tick_label);
             }
@@ -232,7 +309,7 @@ impl Plot2CsvApp {
             }
             let scale = |v: f64, log: bool| if log { v.log10() } else { v };
             plot.show(&mut child, |pu| {
-                for (_, _, cal, ds) in series {
+                for SeriesOwned { cal, ds, .. } in series {
                     let mut pts: Vec<[f64; 2]> = ds
                         .points
                         .iter()
@@ -247,7 +324,9 @@ impl Plot2CsvApp {
                         pu.points(Points::new(ds.name.clone(), PlotPoints::from(pts)).color(col).radius(3.0));
                     } else {
                         pts.sort_by(|a, b| a[0].total_cmp(&b[0]));
-                        pu.line(Line::new(ds.name.clone(), PlotPoints::from(pts)).color(col).width(2.0));
+                        // No "band" shortcut: it draws dense stretches with a vertical
+                        // instead of a perpendicular width (thin steep segments, wedges at spikes).
+                        pu.line(Line::new(ds.name.clone(), PlotPoints::from(pts)).color(col).width(2.0).allow_band(false));
                     }
                 }
             });

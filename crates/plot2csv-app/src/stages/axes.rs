@@ -8,6 +8,7 @@ use plot2csv_core::project::{Stage, TextRole};
 use super::region::to_rect;
 use super::{arrow_nudge, pos, pt};
 use crate::app::Plot2CsvApp;
+use crate::icons::{self, Icon};
 use crate::canvas::CanvasView;
 use crate::dialogs::Dialog;
 use crate::widgets;
@@ -20,6 +21,14 @@ pub struct AxesUi {
     drag: Option<usize>,
     pub focus: Option<Pos2>,
     pub show_grid: bool,
+}
+
+impl AxesUi {
+    /// Drop the selection and drag (after undo/redo).
+    pub fn clear_transient(&mut self) {
+        self.selected = None;
+        self.drag = None;
+    }
 }
 
 pub fn point_color(kind: AxesKind, i: usize) -> Color32 {
@@ -67,11 +76,13 @@ impl Plot2CsvApp {
         w.evidence = r.evidence;
         w.axes.propose(r.axes, r.note);
         self.axes_ui = AxesUi { show_grid: true, ..Default::default() };
-        let missing = self.project.active_work().and_then(|w| w.axes.value.as_ref()).map(|a| !a.points_complete()).unwrap_or(false);
-        if missing {
-            let n = self.project.active_work().and_then(|w| w.axes.value.as_ref()).map(|a| a.points.len()).unwrap_or(0);
-            self.axes_ui.placing = Some(n);
-        }
+        self.resume_placing();
+    }
+
+    /// Ask for the next calibration point when the active calibration is incomplete.
+    pub fn resume_placing(&mut self) {
+        let axes = self.project.active_work().and_then(|w| w.axes.value.as_ref());
+        self.axes_ui.placing = axes.filter(|a| !a.points_complete()).map(|a| a.points.len());
     }
 
     pub fn axes_mut(&mut self) -> Option<&mut Axes> {
@@ -162,7 +173,10 @@ impl Plot2CsvApp {
         ui.add_space(4.0);
         match new_axes.calibrate() {
             Ok(cal) => {
-                ui.label(egui::RichText::new("✔ Calibration OK — hover the image to check values.").color(widgets::OK));
+                ui.horizontal_top(|ui| {
+                    ui.add(icons::image_tinted(ui, Icon::CircleCheck, widgets::OK));
+                    ui.add(egui::Label::new(egui::RichText::new("Calibration OK — hover the image to check values.").color(widgets::OK)).wrap());
+                });
                 ui.checkbox(&mut self.axes_ui.show_grid, "Overlay calibrated grid");
                 self.residuals_ui(ui, &cal);
                 if let Calibration::Xy(c) = &cal {
@@ -172,7 +186,10 @@ impl Plot2CsvApp {
                 }
             }
             Err(e) => {
-                ui.label(egui::RichText::new(format!("✖ {e}")).color(widgets::WARN));
+                ui.horizontal_top(|ui| {
+                    ui.add(icons::image_tinted(ui, Icon::CircleXmark, widgets::WARN));
+                    ui.add(egui::Label::new(egui::RichText::new(e.to_string()).color(widgets::WARN)).wrap());
+                });
             }
         }
         if changed {
@@ -290,6 +307,14 @@ impl Plot2CsvApp {
                 .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
                 .map(|(i, _)| i)
         };
+        // Pointer: a hand over a calibration point (drag it), a crosshair while placing one.
+        if self.axes_ui.drag.is_some() {
+            view.set_cursor(egui::CursorIcon::Grabbing);
+        } else if resp.hover_pos().and_then(nearest).is_some() {
+            view.set_cursor(egui::CursorIcon::Grab);
+        } else if self.axes_ui.placing.is_some() {
+            view.set_cursor(egui::CursorIcon::Crosshair);
+        }
         if resp.drag_started_by(egui::PointerButton::Primary) {
             self.axes_ui.drag = pointer.and_then(nearest);
             if self.axes_ui.drag.is_some() {

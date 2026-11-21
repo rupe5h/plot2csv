@@ -3,6 +3,8 @@
 use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle, Vec2};
 use plot2csv_core::project::{Stage, StageStatus};
 
+use crate::icons::{self, Icon};
+
 pub const ACCENT: Color32 = Color32::from_rgb(255, 195, 0);
 pub const OK: Color32 = Color32::from_rgb(46, 160, 67);
 pub const WARN: Color32 = Color32::from_rgb(214, 120, 0);
@@ -159,8 +161,26 @@ pub fn swatch(ui: &mut egui::Ui, c: [u8; 3], size: f32) -> egui::Response {
 
 /// Primary action button with accent fill.
 pub fn primary_button(ui: &mut egui::Ui, text: &str, enabled: bool) -> egui::Response {
-    let btn = egui::Button::new(egui::RichText::new(text).strong().color(Color32::BLACK))
-        .fill(ACCENT)
-        .min_size(Vec2::new(0.0, 28.0));
+    primary(ui, primary_text(text), enabled)
+}
+
+/// [`primary_button`] with `icon` before the text.
+pub fn primary_button_icon(ui: &mut egui::Ui, icon: Icon, text: &str, enabled: bool) -> egui::Response {
+    let img = icons::image_tinted(ui, icon, Color32::BLACK);
+    primary(ui, (img, primary_text(text)), enabled)
+}
+
+/// [`primary_button`] with `icon` after the text.
+pub fn primary_button_trailing(ui: &mut egui::Ui, text: &str, icon: Icon, enabled: bool) -> egui::Response {
+    let img = icons::image_tinted(ui, icon, Color32::BLACK);
+    primary(ui, (primary_text(text), img), enabled)
+}
+
+fn primary_text(text: &str) -> egui::RichText {
+    egui::RichText::new(text).strong().color(Color32::BLACK)
+}
+
+fn primary<'a>(ui: &mut egui::Ui, atoms: impl egui::IntoAtoms<'a>, enabled: bool) -> egui::Response {
+    let btn = egui::Button::new(atoms).fill(ACCENT).min_size(Vec2::new(0.0, 28.0));
     ui.add_enabled(enabled, btn)
 }

@@ -1,6 +1,6 @@
 //! ④ Text: OCR of tick labels, titles and legend entries, with review/editing.
 
-use egui::{Color32, Pos2, Rect, Stroke, StrokeKind};
+use egui::{Color32, CursorIcon, Pos2, Rect, Stroke, StrokeKind};
 use plot2csv_core::geom::{Pt, RectF};
 use plot2csv_core::project::{Stage, TextItem, TextRole};
 use plot2csv_ocr::labels::{classify, label_value};
@@ -11,6 +11,7 @@ use plot2csv_ocr::TextLine;
 use super::region::to_rect;
 use crate::app::{OcrJob, Plot2CsvApp};
 use crate::canvas::CanvasView;
+use crate::icons::{self, Icon};
 use crate::platform;
 use crate::widgets::{self, c32};
 
@@ -25,6 +26,37 @@ pub struct TextUi {
     pending: Option<(Vec<TextItem>, Vec<bool>)>,
     /// Items while the exponents of power labels (10², 10⁻¹) are read.
     pending_powers: Option<(Vec<TextItem>, PowerScan)>,
+    /// A box's text being edited in place on the image (double-click).
+    inline: Option<InlineEdit>,
+    /// The selection was made on the image: bring its row into view.
+    scroll_to_selected: bool,
+}
+
+/// In-place editor for one text box.
+struct InlineEdit {
+    index: usize,
+    text: String,
+    /// Keyboard focus was handed to the editor.
+    focused: bool,
+}
+
+impl TextUi {
+    /// Drop the selection and a half-drawn box (after undo/redo).
+    pub fn clear_transient(&mut self) {
+        self.selected = None;
+        self.draw_start = None;
+        self.draw_cur = None;
+        self.inline = None;
+    }
+}
+
+/// Fill of the editable Text cells, and of the read-only Value cells.
+fn text_cell_colors(ui: &egui::Ui) -> (Color32, Color32) {
+    if ui.visuals().dark_mode {
+        (Color32::from_gray(12), Color32::from_gray(58))
+    } else {
+        (Color32::WHITE, Color32::from_gray(222))
+    }
 }
 
 /// What an OCR job is for.
@@ -226,7 +258,11 @@ impl Plot2CsvApp {
             });
         }
         ui.horizontal_wrapped(|ui| {
-            let lbl = if self.text_ui.drawing { "Drag a box on the image…" } else { "＋ Read text in a box" };
+            let lbl = if self.text_ui.drawing {
+                egui::Atoms::new("Drag a box on the image…")
+            } else {
+                egui::Atoms::new((icons::image(ui, Icon::Plus), "Read text in a box"))
+            };
             if ui.selectable_label(self.text_ui.drawing, lbl).on_hover_text("Draw a box around text that was missed").clicked() {
                 self.text_ui.drawing = !self.text_ui.drawing;
             }
@@ -250,7 +286,10 @@ impl Plot2CsvApp {
                 }
             }
         });
-        ui.label(egui::RichText::new("Click a box to select it. Edit the text or its role below; tick values feed the axis calibration.").weak());
+        ui.label(
+            egui::RichText::new("Click a box to select it; double-click it to correct its text in place. Edit the text (white) or role below; the value (grey) is read from the text, and tick values feed the axis calibration.")
+                .weak(),
+        );
         ui.add_space(4.0);
 
         let inner = self.project.active_panel.and_then(|id| self.project.panel(id)).map(|p| p.inner);
@@ -259,6 +298,8 @@ impl Plot2CsvApp {
         let mut delete = None;
         let mut order: Vec<usize> = (0..items.len()).collect();
         order.sort_by_key(|&i| (TextRole::ALL.iter().position(|r| *r == items[i].role), (items[i].bbox.y0 as i64) / 8, items[i].bbox.x0 as i64));
+        let scroll_to = std::mem::take(&mut self.text_ui.scroll_to_selected).then_some(self.text_ui.selected).flatten();
+        let (text_fill, value_fill) = text_cell_colors(ui);
         egui::Grid::new("text_items").num_columns(4).striped(true).spacing([6.0, 3.0]).show(ui, |ui| {
             ui.label(egui::RichText::new("Role").strong());
             ui.label(egui::RichText::new("Text").strong());
@@ -274,7 +315,7 @@ impl Plot2CsvApp {
                     if r.clicked() {
                         self.text_ui.selected = Some(i);
                     }
-                    egui::ComboBox::from_id_salt(("role", i)).width(70.0).selected_text(it.role.label()).show_ui(ui, |ui| {
+                    let role = egui::ComboBox::from_id_salt(("role", i)).width(70.0).selected_text(it.role.label()).show_ui(ui, |ui| {
                         for role in TextRole::ALL {
                             if ui.selectable_value(&mut it.role, role, role.label()).changed() {
                                 it.manual = true;
@@ -282,12 +323,17 @@ impl Plot2CsvApp {
                             }
                         }
                     });
+                    role.response.on_hover_cursor(CursorIcon::PointingHand);
                 });
-                let te = ui.add(
-                    egui::TextEdit::singleline(&mut it.text)
-                        .desired_width(110.0)
-                        .text_color_opt(sel.then_some(widgets::INFO)),
-                );
+                // Editable: a white field with a frame and the text cursor.
+                let te = ui
+                    .add(
+                        egui::TextEdit::singleline(&mut it.text)
+                            .desired_width(110.0)
+                            .background_color(text_fill)
+                            .text_color_opt(sel.then_some(widgets::INFO)),
+                    )
+                    .on_hover_cursor(CursorIcon::Text);
                 if te.changed() {
                     it.value = label_value(&it.text);
                     it.manual = true;
@@ -296,12 +342,25 @@ impl Plot2CsvApp {
                 if te.gained_focus() {
                     self.text_ui.selected = Some(i);
                 }
+                if scroll_to == Some(i) {
+                    te.scroll_to_me(Some(egui::Align::Center));
+                }
+                // Read-only: a grey cell, no frame.
                 let v = match it.value {
                     Some(v) => format!("{v}"),
                     None => "—".into(),
                 };
-                ui.label(egui::RichText::new(v).monospace()).on_hover_text(format!("OCR confidence {:.0}%", it.conf * 100.0));
-                if ui.small_button("🗑").clicked() {
+                egui::Frame::new()
+                    .fill(value_fill)
+                    .corner_radius(2)
+                    .inner_margin(egui::Margin::symmetric(4, 2))
+                    .show(ui, |ui| {
+                        ui.set_min_width(52.0);
+                        ui.label(egui::RichText::new(v).monospace())
+                    })
+                    .response
+                    .on_hover_text(format!("Read from the text (edit the text to change it). OCR confidence {:.0}%", it.conf * 100.0));
+                if ui.small_button(icons::image(ui, Icon::TrashCan)).on_hover_text("Delete").clicked() {
                     delete = Some(i);
                 }
                 ui.end_row();
@@ -370,7 +429,18 @@ impl Plot2CsvApp {
         }
         let resp = &view.response;
         let pointer = resp.interact_pointer_pos();
+        // The smallest box at a screen position (boxes can nest).
+        let item_at = |p: Pos2| -> Option<usize> {
+            let ip = super::pt(view.to_image(p));
+            items
+                .iter()
+                .enumerate()
+                .filter(|(_, it)| it.bbox.expand(3.0).contains(ip))
+                .min_by(|a, b| a.1.bbox.area().partial_cmp(&b.1.bbox.area()).unwrap())
+                .map(|(i, _)| i)
+        };
         if self.text_ui.drawing {
+            view.set_cursor(CursorIcon::Crosshair);
             if resp.drag_started_by(egui::PointerButton::Primary) {
                 self.text_ui.draw_start = pointer.map(|p| view.to_image(p));
             }
@@ -398,17 +468,24 @@ impl Plot2CsvApp {
             }
             return;
         }
+        // A box: click selects, double-click edits its text in place.
+        if resp.hover_pos().and_then(item_at).is_some() {
+            view.set_cursor(CursorIcon::PointingHand);
+        }
         if resp.clicked() {
             if let Some(p) = pointer {
-                let ip = super::pt(view.to_image(p));
-                self.text_ui.selected = items
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, it)| it.bbox.expand(3.0).contains(ip))
-                    .min_by(|a, b| a.1.bbox.area().partial_cmp(&b.1.bbox.area()).unwrap())
-                    .map(|(i, _)| i);
+                self.text_ui.selected = item_at(p);
+                self.text_ui.scroll_to_selected = self.text_ui.selected.is_some();
             }
         }
+        if resp.double_clicked() {
+            if let Some(i) = pointer.and_then(item_at) {
+                self.text_ui.selected = Some(i);
+                self.text_ui.scroll_to_selected = true;
+                self.text_ui.inline = Some(InlineEdit { index: i, text: items[i].text.clone(), focused: false });
+            }
+        }
+        self.inline_text_editor(ctx, view, &items);
         if let (Some(i), true) = (self.text_ui.selected, ctx.input(|inp| inp.key_pressed(egui::Key::Delete) || inp.key_pressed(egui::Key::Backspace)) && !ctx.egui_wants_keyboard_input()) {
             if let Some(v) = self.text_items_mut() {
                 if i < v.len() {
@@ -418,5 +495,56 @@ impl Plot2CsvApp {
             self.text_ui.selected = None;
             self.edited(Stage::Text);
         }
+    }
+
+    /// The in-place editor over a text box (opened by double-clicking it):
+    /// Enter or clicking elsewhere keeps the text, Esc cancels.
+    fn inline_text_editor(&mut self, ctx: &egui::Context, view: &CanvasView, items: &[TextItem]) {
+        let Some(ed) = self.text_ui.inline.as_mut() else { return };
+        let Some(it) = items.get(ed.index) else {
+            self.text_ui.inline = None;
+            return;
+        };
+        let r = view.rect_to_screen(to_rect(&it.bbox));
+        let col = c32(it.role.color());
+        let size = (0.8 * r.height()).clamp(13.0, 28.0);
+        let width = (r.width() + 24.0).max(90.0);
+        let id = egui::Id::unique("text_inline_edit");
+        let area = egui::Area::new(id.with("area"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(r.left_top() - egui::vec2(3.0, 3.0))
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).inner_margin(2).stroke(Stroke::new(2.0, col)).show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut ed.text)
+                            .id(id)
+                            .font(egui::FontId::proportional(size))
+                            .desired_width(width)
+                            .background_color(text_cell_colors(ui).0),
+                    )
+                })
+                .inner
+            });
+        let te = area.inner;
+        if !ed.focused {
+            te.request_focus();
+            ed.focused = true;
+            return;
+        }
+        if !te.lost_focus() && te.has_focus() {
+            return;
+        }
+        let cancel = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        let Some(ed) = self.text_ui.inline.take() else { return };
+        if cancel || ed.text == it.text {
+            return;
+        }
+        if let Some(v) = self.text_items_mut().and_then(|v| v.get_mut(ed.index)) {
+            v.text = ed.text.trim().to_string();
+            v.value = label_value(&v.text);
+            v.manual = true;
+        }
+        self.status = format!("Text set to “{}”.", ed.text.trim());
+        self.edited(Stage::Text);
     }
 }

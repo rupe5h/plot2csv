@@ -6,6 +6,7 @@ use plot2csv_core::dataset::ColorMode;
 use plot2csv_core::project::Stage;
 
 use crate::app::Plot2CsvApp;
+use crate::icons::{self, Icon};
 use crate::stages::axes_values_ui;
 use crate::widgets::{self, ACCENT};
 
@@ -29,7 +30,7 @@ fn modal<R>(ctx: &egui::Context, id: &str, title: &str, width: f32, body: impl F
         let r = egui::Frame::new().fill(ACCENT).inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(title).strong().color(Color32::BLACK));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.button(RichText::new("✕").color(Color32::BLACK)).clicked()).inner
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.button(icons::image_tinted(ui, Icon::Xmark, Color32::BLACK)).on_hover_text("Close").clicked()).inner
             })
             .inner
         });
@@ -45,6 +46,9 @@ const PLOT2CSV_LICENSE: &str = include_str!("../../../LICENSE");
 /// Copy of indra-ocr's LICENSE (same SHA-256 as pinned in xtask).
 const INDRA_MODELS_LICENSE: &str = include_str!("../licenses/indra-ocr-models.txt");
 const ONNXRUNTIME_LICENSE: &str = include_str!("../licenses/onnxruntime.txt");
+const INTER_LICENSE: &str = include_str!("../licenses/inter-ofl.txt");
+const HACK_LICENSE: &str = include_str!("../licenses/hack.txt");
+const FONTAWESOME_LICENSE: &str = include_str!("../licenses/fontawesome-free.txt");
 
 fn license_text(ui: &mut egui::Ui, id: &str, title: &str, text: &str) {
     egui::CollapsingHeader::new(title).id_salt(id).default_open(false).show(ui, |ui| {
@@ -101,6 +105,18 @@ fn licenses_ui(ui: &mut egui::Ui) {
     });
     ui.label("onnxruntime-web 1.31.1, which runs the OCR models in the browser, is under the MIT License, © Microsoft Corporation.");
     license_text(ui, "lic_ort", "MIT License (onnxruntime-web)", ONNXRUNTIME_LICENSE);
+    ui.horizontal_wrapped(|ui| {
+        ui.label("The interface font is Inter, © The Inter Project Authors, under the SIL Open Font License 1.1:");
+        ui.hyperlink_to("rsms.me/inter", "https://rsms.me/inter/");
+    });
+    license_text(ui, "lic_inter", "SIL Open Font License 1.1 (Inter)", INTER_LICENSE);
+    ui.label("The monospace font is Hack, © Source Foundry Authors, under the MIT License, with parts under the Bitstream Vera License.");
+    license_text(ui, "lic_hack", "Hack licence", HACK_LICENSE);
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Icons are from Font Awesome Free 7.3.1, © Fonticons, Inc., under the CC BY 4.0 licence:");
+        ui.hyperlink_to("fontawesome.com", "https://fontawesome.com");
+    });
+    license_text(ui, "lic_fa", "Font Awesome Free licence", FONTAWESOME_LICENSE);
     ui.label("The Rust libraries compiled into the app (egui, eframe, image, imageproc, nalgebra and others) are under the MIT and/or Apache-2.0 licences.");
 }
 
@@ -134,6 +150,8 @@ impl Plot2CsvApp {
                             ("Pan", "Space+drag, right- or middle-drag", "Space+drag, right-drag"),
                             ("Zoom in / out / fit", "+ / − / F", "+ / − / F"),
                             ("Approve the current stage and continue", "Enter", "Return"),
+                            ("Undo", "Ctrl+Z", "Cmd+Z"),
+                            ("Redo", "Ctrl+Y or Ctrl+Shift+Z", "Cmd+Shift+Z"),
                             ("Paste an image", "Ctrl+V", "Cmd+V"),
                             ("Add / Adjust / Delete point (Data stage)", "A / S / D", "A / S / D"),
                             ("Move the selected point by 1 px", "Arrow keys", "Arrow keys"),
@@ -285,7 +303,8 @@ impl Plot2CsvApp {
                     }
                 }
             });
-            ui.label(RichText::new("Tip: use “🖊 Pick” in the sidebar to take the colour from the image.").weak().small());
+            let weak = ui.visuals().weak_text_color();
+            icons::rich_label(ui, "Tip: use “{eye-dropper} Pick” in the sidebar to take the colour from the image.", egui::TextStyle::Small, weak);
             ui.button("Done").clicked()
         });
         let old = if background { ds.auto.bg } else { ds.auto.fg };

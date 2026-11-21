@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>plot2csv — plot digitizer</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #1b1b1b; }
+  #wp_canvas { position: absolute; inset: 0; width: 100%; height: 100%; outline: none; }
+  #wp_loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: #ccc; font: 16px system-ui, sans-serif; flex-direction: column; gap: 8px; }
+  #wp_loading small { color: #888; }
+</style>
+</head>
+<body>
+<canvas id="wp_canvas"></canvas>
+<div id="wp_loading">Loading plot2csv…<small id="wp_loading_detail"></small></div>
+<!--PAYLOADS-->
+<script type="module">
+/*ORT_JS*/
+</script>
+<script type="module">
+/*BRIDGE_JS*/
+</script>
+<script type="module">
+/*APP_JS*/
+// ---- boot ----
+try {
+  const bytes = await globalThis.wpPayload("app_wasm");
+  await __wbg_init({ module_or_path: bytes });
+  globalThis.wpApp = { ocr_image_json };
+  await start("wp_canvas");
+  document.getElementById("wp_loading").remove();
+} catch (e) {
+  console.error(e);
+  document.getElementById("wp_loading_detail").textContent = "Failed to start: " + e;
+}
+</script>
+</body>
+</html>

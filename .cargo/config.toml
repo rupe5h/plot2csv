@@ -1,0 +1,9 @@
+[alias]
+xtask = "run --package xtask --release --"
+
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg", "getrandom_backend=\"wasm_js\""]
+
+[env]
+# onnxruntime's prebuilt static library targets macOS 13.4.
+MACOSX_DEPLOYMENT_TARGET = "13.4"

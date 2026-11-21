@@ -1,0 +1,13 @@
+# Build output
+/target
+/dist
+
+# Fetched by `cargo xtask fetch` (onnxruntime-web + indra-ocr models, SHA256-pinned)
+/vendor
+
+# Tooling
+__pycache__/
+node_modules/
+
+# OS / editor
+.DS_Store

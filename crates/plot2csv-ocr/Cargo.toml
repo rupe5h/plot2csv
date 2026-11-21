@@ -1,0 +1,28 @@
+[package]
+name = "plot2csv-ocr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+native-ocr = ["dep:ort"]
+
+[dependencies]
+plot2csv-core.workspace = true
+plot2csv-vision.workspace = true
+image.workspace = true
+imageproc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+log.workspace = true
+chrono.workspace = true
+ort = { version = "=2.0.0-rc.15", optional = true }
+
+[[example]]
+name = "ocr_cli"
+required-features = ["native-ocr"]
+
+[[example]]
+name = "eval"
+required-features = ["native-ocr"]

@@ -1,0 +1,13 @@
+[package]
+name = "plot2csv-vision"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+plot2csv-core.workspace = true
+image.workspace = true
+imageproc.workspace = true
+nalgebra.workspace = true
+serde.workspace = true
+log.workspace = true

@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = ["crates/plot2csv-core", "crates/plot2csv-vision", "crates/plot2csv-ocr", "crates/plot2csv-app", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+plot2csv-core = { path = "crates/plot2csv-core" }
+plot2csv-vision = { path = "crates/plot2csv-vision" }
+plot2csv-ocr = { path = "crates/plot2csv-ocr" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+imageproc = { version = "0.27", default-features = false }
+nalgebra = { version = "0.35", default-features = false, features = ["std"] }
+base64 = "0.23"
+log = "0.4"
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# Native tools/benchmarks: LTO breaks linking onnxruntime's CoreML objects on macOS.
+[profile.eval]
+inherits = "release"
+lto = false
+codegen-units = 16
+panic = "unwind"

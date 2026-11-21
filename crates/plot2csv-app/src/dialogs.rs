@@ -30,7 +30,10 @@ fn modal<R>(ctx: &egui::Context, id: &str, title: &str, width: f32, body: impl F
         let r = egui::Frame::new().fill(ACCENT).inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(title).strong().color(Color32::BLACK));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.button(icons::image_tinted(ui, Icon::Xmark, Color32::BLACK)).on_hover_text("Close").clicked()).inner
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.button(icons::image_tinted(ui, Icon::Xmark, Color32::BLACK)).on_hover_text("Close").clicked()
+                })
+                .inner
             })
             .inner
         });
@@ -304,7 +307,12 @@ impl Plot2CsvApp {
                 }
             });
             let weak = ui.visuals().weak_text_color();
-            icons::rich_label(ui, "Tip: use “{eye-dropper} Pick” in the sidebar to take the colour from the image.", egui::TextStyle::Small, weak);
+            icons::rich_label(
+                ui,
+                "Tip: use “{eye-dropper} Pick” in the sidebar to take the colour from the image.",
+                egui::TextStyle::Small,
+                weak,
+            );
             ui.button("Done").clicked()
         });
         let old = if background { ds.auto.bg } else { ds.auto.fg };
@@ -328,19 +336,23 @@ impl Plot2CsvApp {
         let dss = self.datasets();
         let active = self.active_ds_index();
         let name_id = egui::Id::unique("ds_name_edit");
-        let mut name: String = ctx.data(|d| d.get_temp(name_id)).unwrap_or_else(|| dss.get(active).map(|d| d.name.clone()).unwrap_or_default());
+        let mut name: String =
+            ctx.data(|d| d.get_temp(name_id)).unwrap_or_else(|| dss.get(active).map(|d| d.name.clone()).unwrap_or_default());
         let mut select = None;
         let mut change = false;
         let (open, (enter, add, del, view, close)) = modal(ctx, "dsmgr", "Manage Datasets", 360.0, |ui| {
             egui::Grid::new("dsm").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
                 ui.label("Selected Dataset:");
-                egui::ComboBox::from_id_salt("dsm_sel").selected_text(dss.get(active).map(|d| d.name.clone()).unwrap_or_default()).show_ui(ui, |ui| {
-                    for (i, d) in dss.iter().enumerate() {
-                        if ui.selectable_label(i == active, &d.name).clicked() {
-                            select = Some(i);
+                egui::ComboBox::from_id_salt("dsm_sel").selected_text(dss.get(active).map(|d| d.name.clone()).unwrap_or_default()).show_ui(
+                    ui,
+                    |ui| {
+                        for (i, d) in dss.iter().enumerate() {
+                            if ui.selectable_label(i == active, &d.name).clicked() {
+                                select = Some(i);
+                            }
                         }
-                    }
-                });
+                    },
+                );
                 ui.end_row();
                 ui.label("Dataset Name:");
                 change = ui
@@ -355,7 +367,16 @@ impl Plot2CsvApp {
                 ui.end_row();
             });
             ui.add_space(6.0);
-            let r = ui.horizontal(|ui| (ui.button("Add").clicked(), ui.button("Delete").clicked(), ui.button("View Data").clicked(), ui.button("Close").clicked())).inner;
+            let r = ui
+                .horizontal(|ui| {
+                    (
+                        ui.button("Add").clicked(),
+                        ui.button("Delete").clicked(),
+                        ui.button("View Data").clicked(),
+                        ui.button("Close").clicked(),
+                    )
+                })
+                .inner;
             (ui.input(|i| i.key_pressed(egui::Key::Enter)), r.0, r.1, r.2, r.3)
         });
         let change = change || enter;

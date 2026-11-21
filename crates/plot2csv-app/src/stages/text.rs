@@ -211,7 +211,8 @@ impl Plot2CsvApp {
         match purpose {
             OcrPurpose::Auto | OcrPurpose::AutoTicks | OcrPurpose::AutoPowers => {
                 let n_ticks = new_items.iter().filter(|i| matches!(i.role, TextRole::XTick | TextRole::YTick)).count();
-                let note = format!("Read {} text items ({} tick labels) in {:.1}s. Check the roles and values.", new_items.len(), n_ticks, dt);
+                let note =
+                    format!("Read {} text items ({} tick labels) in {:.1}s. Check the roles and values.", new_items.len(), n_ticks, dt);
                 w.text.propose(new_items, note.clone());
                 self.status = note;
             }
@@ -297,7 +298,9 @@ impl Plot2CsvApp {
         let mut changed = false;
         let mut delete = None;
         let mut order: Vec<usize> = (0..items.len()).collect();
-        order.sort_by_key(|&i| (TextRole::ALL.iter().position(|r| *r == items[i].role), (items[i].bbox.y0 as i64) / 8, items[i].bbox.x0 as i64));
+        order.sort_by_key(|&i| {
+            (TextRole::ALL.iter().position(|r| *r == items[i].role), (items[i].bbox.y0 as i64) / 8, items[i].bbox.x0 as i64)
+        });
         let scroll_to = std::mem::take(&mut self.text_ui.scroll_to_selected).then_some(self.text_ui.selected).flatten();
         let (text_fill, value_fill) = text_cell_colors(ui);
         egui::Grid::new("text_items").num_columns(4).striped(true).spacing([6.0, 3.0]).show(ui, |ui| {
@@ -422,7 +425,12 @@ impl Plot2CsvApp {
             }
         }
         if let (Some(a), Some(b)) = (self.text_ui.draw_start, self.text_ui.draw_cur) {
-            painter.rect_stroke(Rect::from_two_pos(view.to_screen(a), view.to_screen(b)), 0.0, Stroke::new(2.0, widgets::INFO), StrokeKind::Middle);
+            painter.rect_stroke(
+                Rect::from_two_pos(view.to_screen(a), view.to_screen(b)),
+                0.0,
+                Stroke::new(2.0, widgets::INFO),
+                StrokeKind::Middle,
+            );
         }
         if !interactive {
             return;
@@ -448,9 +456,12 @@ impl Plot2CsvApp {
                 self.text_ui.draw_cur = pointer.map(|p| view.to_image(p));
             }
             if resp.drag_stopped() {
-                if let (Some(a), Some(b), Some(id), Some(g)) =
-                    (self.text_ui.draw_start.take(), self.text_ui.draw_cur.take(), self.project.active_panel, self.imgs.corrected_gray.clone())
-                {
+                if let (Some(a), Some(b), Some(id), Some(g)) = (
+                    self.text_ui.draw_start.take(),
+                    self.text_ui.draw_cur.take(),
+                    self.project.active_panel,
+                    self.imgs.corrected_gray.clone(),
+                ) {
                     let r = RectF::new(a.x as f64, a.y as f64, b.x as f64, b.y as f64);
                     if r.width() > 4.0 && r.height() > 4.0 {
                         let (off, img) = crop(&g, &r);
@@ -486,7 +497,11 @@ impl Plot2CsvApp {
             }
         }
         self.inline_text_editor(ctx, view, &items);
-        if let (Some(i), true) = (self.text_ui.selected, ctx.input(|inp| inp.key_pressed(egui::Key::Delete) || inp.key_pressed(egui::Key::Backspace)) && !ctx.egui_wants_keyboard_input()) {
+        if let (Some(i), true) = (
+            self.text_ui.selected,
+            ctx.input(|inp| inp.key_pressed(egui::Key::Delete) || inp.key_pressed(egui::Key::Backspace))
+                && !ctx.egui_wants_keyboard_input(),
+        ) {
             if let Some(v) = self.text_items_mut() {
                 if i < v.len() {
                     v.remove(i);
@@ -510,21 +525,24 @@ impl Plot2CsvApp {
         let size = (0.8 * r.height()).clamp(13.0, 28.0);
         let width = (r.width() + 24.0).max(90.0);
         let id = egui::Id::unique("text_inline_edit");
-        let area = egui::Area::new(id.with("area"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(r.left_top() - egui::vec2(3.0, 3.0))
-            .show(ctx, |ui| {
-                egui::Frame::popup(ui.style()).inner_margin(2).stroke(Stroke::new(2.0, col)).show(ui, |ui| {
-                    ui.add(
-                        egui::TextEdit::singleline(&mut ed.text)
-                            .id(id)
-                            .font(egui::FontId::proportional(size))
-                            .desired_width(width)
-                            .background_color(text_cell_colors(ui).0),
-                    )
-                })
-                .inner
-            });
+        let area = egui::Area::new(id.with("area")).order(egui::Order::Foreground).fixed_pos(r.left_top() - egui::vec2(3.0, 3.0)).show(
+            ctx,
+            |ui| {
+                egui::Frame::popup(ui.style())
+                    .inner_margin(2)
+                    .stroke(Stroke::new(2.0, col))
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut ed.text)
+                                .id(id)
+                                .font(egui::FontId::proportional(size))
+                                .desired_width(width)
+                                .background_color(text_cell_colors(ui).0),
+                        )
+                    })
+                    .inner
+            },
+        );
         let te = area.inner;
         if !ed.focused {
             te.request_focus();

@@ -2,11 +2,11 @@ use std::future::Future;
 use std::sync::mpsc::{channel, Receiver};
 
 use js_sys::{Array, BigInt64Array, Float32Array, Object, Reflect, Uint8Array};
+use plot2csv_ocr::backend::{LocalFuture, Model, OcrBackend, Tensor, TensorData};
+use plot2csv_ocr::{IndraConfig, TextLine};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use plot2csv_ocr::backend::{LocalFuture, Model, OcrBackend, Tensor, TensorData};
-use plot2csv_ocr::{IndraConfig, TextLine};
 
 pub fn spawn_local<F: Future<Output = ()> + 'static>(f: F) {
     wasm_bindgen_futures::spawn_local(f);
@@ -177,21 +177,14 @@ async fn indra_config() -> anyhow::Result<IndraConfig> {
         return Ok(c);
     }
     let ort = wp_ort().ok_or_else(|| anyhow::anyhow!("onnxruntime bridge not loaded"))?;
-    let text = call_async(&ort, "metaText", &[])
-        .await
-        .map_err(|e| anyhow::anyhow!("loading OCR meta: {e:?}"))?
-        .as_string()
-        .unwrap_or_default();
+    let text =
+        call_async(&ort, "metaText", &[]).await.map_err(|e| anyhow::anyhow!("loading OCR meta: {e:?}"))?.as_string().unwrap_or_default();
     let cfg = IndraConfig::from_meta_json(&text)?;
     CFG.with(|c| *c.borrow_mut() = Some(cfg.clone()));
     Ok(cfg)
 }
 
-pub fn run_ocr(
-    ctx: &egui::Context,
-    gray: image::GrayImage,
-    boxes: Option<Vec<[f32; 4]>>,
-) -> Receiver<Result<Vec<TextLine>, String>> {
+pub fn run_ocr(ctx: &egui::Context, gray: image::GrayImage, boxes: Option<Vec<[f32; 4]>>) -> Receiver<Result<Vec<TextLine>, String>> {
     let (tx, rx) = channel();
     let ctx = ctx.clone();
     spawn_local(async move {

@@ -8,9 +8,9 @@ use plot2csv_core::project::{Stage, TextRole};
 use super::region::to_rect;
 use super::{arrow_nudge, pos, pt};
 use crate::app::Plot2CsvApp;
-use crate::icons::{self, Icon};
 use crate::canvas::CanvasView;
 use crate::dialogs::Dialog;
+use crate::icons::{self, Icon};
 use crate::widgets;
 
 #[derive(Default)]
@@ -175,7 +175,10 @@ impl Plot2CsvApp {
             Ok(cal) => {
                 ui.horizontal_top(|ui| {
                     ui.add(icons::image_tinted(ui, Icon::CircleCheck, widgets::OK));
-                    ui.add(egui::Label::new(egui::RichText::new("Calibration OK — hover the image to check values.").color(widgets::OK)).wrap());
+                    ui.add(
+                        egui::Label::new(egui::RichText::new("Calibration OK — hover the image to check values.").color(widgets::OK))
+                            .wrap(),
+                    );
                 });
                 ui.checkbox(&mut self.axes_ui.show_grid, "Overlay calibrated grid");
                 self.residuals_ui(ui, &cal);
@@ -199,7 +202,9 @@ impl Plot2CsvApp {
             self.edited(Stage::Axes);
         }
         ui.add_space(6.0);
-        ui.label(egui::RichText::new("Tip: drag a point to move it; arrow keys nudge the selected point (Shift ×10, Alt ×¼).").weak().small());
+        ui.label(
+            egui::RichText::new("Tip: drag a point to move it; arrow keys nudge the selected point (Shift ×10, Alt ×¼).").weak().small(),
+        );
         let _ = ctx;
     }
 
@@ -228,7 +233,11 @@ impl Plot2CsvApp {
                         ui.label(items.get(ti).map(|t| t.text.clone()).unwrap_or_default());
                         ui.label(format!("{:.4}", got));
                         let rel = if v != 0.0 { ((got - v) / v).abs() } else { (got - v).abs() };
-                        ui.label(egui::RichText::new(format!("{:.2}%", rel * 100.0)).color(if rel < 0.01 { widgets::OK } else { widgets::WARN }));
+                        ui.label(egui::RichText::new(format!("{:.2}%", rel * 100.0)).color(if rel < 0.01 {
+                            widgets::OK
+                        } else {
+                            widgets::WARN
+                        }));
                         ui.end_row();
                     }
                 }
@@ -290,7 +299,13 @@ impl Plot2CsvApp {
         }
         if let (Some(i), Some(h)) = (self.axes_ui.placing, view.hover) {
             if let Some(n) = names.get(i) {
-                widgets::label_box(&painter, view.to_screen(h) + egui::vec2(14.0, 14.0), egui::Align2::LEFT_TOP, &format!("click to place {n}"), point_color(kind, i));
+                widgets::label_box(
+                    &painter,
+                    view.to_screen(h) + egui::vec2(14.0, 14.0),
+                    egui::Align2::LEFT_TOP,
+                    &format!("click to place {n}"),
+                    point_color(kind, i),
+                );
             }
         }
         if !interactive {
@@ -388,7 +403,8 @@ fn draw_cal_grid(painter: &egui::Painter, view: &CanvasView, cal: &Calibration, 
     let tcol = Color32::from_rgb(170, 0, 170);
     match cal {
         Calibration::Xy(_) => {
-            let corners = [Pt::new(inner.x0, inner.y0), Pt::new(inner.x1, inner.y0), Pt::new(inner.x0, inner.y1), Pt::new(inner.x1, inner.y1)];
+            let corners =
+                [Pt::new(inner.x0, inner.y0), Pt::new(inner.x1, inner.y0), Pt::new(inner.x0, inner.y1), Pt::new(inner.x1, inner.y1)];
             let d: Vec<Vec<f64>> = corners.iter().map(|p| cal.to_data(*p)).collect();
             let (xlo, xhi) = (d.iter().map(|v| v[0]).fold(f64::MAX, f64::min), d.iter().map(|v| v[0]).fold(f64::MIN, f64::max));
             let (ylo, yhi) = (d.iter().map(|v| v[1]).fold(f64::MAX, f64::min), d.iter().map(|v| v[1]).fold(f64::MIN, f64::max));
@@ -467,7 +483,11 @@ pub fn calibration_values_ui(ui: &mut egui::Ui, axes: &mut Axes) -> bool {
                 changed |= ui.checkbox(&mut p.log_y, "").changed();
                 ui.end_row();
             });
-            ui.label(egui::RichText::new("For dates use yyyy/mm/dd or yyyy/mm (e.g. 2013/10/23). For exponents enter 1e-3 for 10⁻³.").weak().small());
+            ui.label(
+                egui::RichText::new("For dates use yyyy/mm/dd or yyyy/mm (e.g. 2013/10/23). For exponents enter 1e-3 for 10⁻³.")
+                    .weak()
+                    .small(),
+            );
             if plot2csv_core::value::parse_date(&p.x1).is_some() || plot2csv_core::value::parse_date(&p.y1).is_some() {
                 ui.horizontal(|ui| {
                     ui.label("Date output format");
@@ -511,7 +531,8 @@ pub fn calibration_values_ui(ui: &mut egui::Ui, axes: &mut Axes) -> bool {
         AxesParams::Ternary(p) => {
             ui.label("Axes orientation");
             ui.horizontal(|ui| {
-                changed |= ui.radio_value(&mut p.normal, true, "Normal").on_hover_text("a = 100% at A (bottom-left), b at B, c at C").changed();
+                changed |=
+                    ui.radio_value(&mut p.normal, true, "Normal").on_hover_text("a = 100% at A (bottom-left), b at B, c at C").changed();
                 changed |= ui.radio_value(&mut p.normal, false, "Reverse").changed();
             });
             ui.label("Range of variables");

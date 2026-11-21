@@ -253,7 +253,13 @@ pub fn detect_correction(src: &GrayImage) -> CorrectionResult {
     };
     let a3 = Matrix3::new(a_lin[(0, 0)], a_lin[(0, 1)], 0.0, a_lin[(1, 0)], a_lin[(1, 1)], 0.0, 0.0, 0.0, 1.0);
     let rect = a3 * hp; // normalised source -> rectified (unknown scale)
-    let rect_h = Homography { m: [[rect[(0, 0)], rect[(0, 1)], rect[(0, 2)]], [rect[(1, 0)], rect[(1, 1)], rect[(1, 2)]], [rect[(2, 0)], rect[(2, 1)], rect[(2, 2)]]] };
+    let rect_h = Homography {
+        m: [
+            [rect[(0, 0)], rect[(0, 1)], rect[(0, 2)]],
+            [rect[(1, 0)], rect[(1, 1)], rect[(1, 2)]],
+            [rect[(2, 0)], rect[(2, 1)], rect[(2, 2)]],
+        ],
+    };
 
     // Full transform in source px: S · rect · N · (1/s scaling to work px).
     let to_work = Homography { m: [[s as f64, 0.0, 0.0], [0.0, s as f64, 0.0], [0.0, 0.0, 1.0]] };
@@ -303,11 +309,8 @@ pub fn detect_correction(src: &GrayImage) -> CorrectionResult {
     let mx = (cx1 - cx0) * 0.12 + 20.0;
     let my = (cy1 - cy0) * 0.12 + 20.0;
     // Prefer the whole image when perspective is mild (screenshots, scans).
-    let (ox0, oy0, ox1, oy1) = if persp {
-        ((cx0 - mx).max(ix0), (cy0 - my).max(iy0), (cx1 + mx).min(ix1), (cy1 + my).min(iy1))
-    } else {
-        (ix0, iy0, ix1, iy1)
-    };
+    let (ox0, oy0, ox1, oy1) =
+        if persp { ((cx0 - mx).max(ix0), (cy0 - my).max(iy0), (cx1 + mx).min(ix1), (cy1 + my).min(iy1)) } else { (ix0, iy0, ix1, iy1) };
     let (out_w, out_h) = ((ox1 - ox0).round().max(16.0), (oy1 - oy0).round().max(16.0));
     // Guard against absurd outputs.
     if out_w > 3.0 * sw as f64 || out_h > 3.0 * sh as f64 {
@@ -315,12 +318,8 @@ pub fn detect_correction(src: &GrayImage) -> CorrectionResult {
     }
     let final_h = scaled.then(&Homography::translation(-ox0, -oy0));
     let inv = final_h.inverse().unwrap_or_default();
-    let quad = [
-        inv.apply(Pt::new(0.0, 0.0)),
-        inv.apply(Pt::new(out_w, 0.0)),
-        inv.apply(Pt::new(out_w, out_h)),
-        inv.apply(Pt::new(0.0, out_h)),
-    ];
+    let quad =
+        [inv.apply(Pt::new(0.0, 0.0)), inv.apply(Pt::new(out_w, 0.0)), inv.apply(Pt::new(out_w, out_h)), inv.apply(Pt::new(0.0, out_h))];
     let n_lines = hl.len() + vl.len();
     let total_len: f64 = hl.iter().chain(vl.iter()).map(|l| l.len()).sum::<f64>() / (w + h);
     let confidence = (0.35 + 0.1 * n_lines.min(4) as f64 + 0.15 * total_len.min(2.0)).min(0.99);
@@ -400,7 +399,12 @@ mod tests {
                 for dy in -ri..=ri {
                     for dx in -ri..=ri {
                         let (x, y) = (p.x.round() as i64 + dx, p.y.round() as i64 + dy);
-                        if ((dx * dx + dy * dy) as f64) <= r * r && x >= 0 && y >= 0 && (x as u32) < img.width() && (y as u32) < img.height() {
+                        if ((dx * dx + dy * dy) as f64) <= r * r
+                            && x >= 0
+                            && y >= 0
+                            && (x as u32) < img.width()
+                            && (y as u32) < img.height()
+                        {
                             img.put_pixel(x as u32, y as u32, c);
                         }
                     }

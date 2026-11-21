@@ -43,9 +43,7 @@ fn fetch() -> Result<()> {
     std::fs::create_dir_all(&ort_dir)?;
     if !ort_dir.join("package/dist/ort.wasm.bundle.min.mjs").exists() {
         run(Command::new("npm").args(["pack", &format!("onnxruntime-web@{ORT_VERSION}")]).current_dir(&ort_dir))?;
-        run(Command::new("tar")
-            .args(["-xzf", &format!("onnxruntime-web-{ORT_VERSION}.tgz")])
-            .current_dir(&ort_dir))?;
+        run(Command::new("tar").args(["-xzf", &format!("onnxruntime-web-{ORT_VERSION}.tgz")]).current_dir(&ort_dir))?;
     }
     let mdir = vendor.join("models");
     std::fs::create_dir_all(&mdir)?;
@@ -152,7 +150,16 @@ fn dist(dev: bool) -> Result<()> {
         let opt = out.join("plot2csv_app_opt.wasm");
         run(Command::new("wasm-opt")
             .arg(&wasm_path)
-            .args(["-Oz", "--enable-bulk-memory", "--enable-nontrapping-float-to-int", "--enable-sign-ext", "--enable-reference-types", "--enable-multivalue", "--enable-mutable-globals", "-o"])
+            .args([
+                "-Oz",
+                "--enable-bulk-memory",
+                "--enable-nontrapping-float-to-int",
+                "--enable-sign-ext",
+                "--enable-reference-types",
+                "--enable-multivalue",
+                "--enable-mutable-globals",
+                "-o",
+            ])
             .arg(&opt))?;
         wasm_path = opt;
     }

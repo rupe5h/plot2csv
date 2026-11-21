@@ -69,11 +69,7 @@ fn refine_line(g: &Gray, horizontal: bool, guess: f64, span: (f64, f64), search:
     let mut best = (guess, f64::MAX);
     for d in -search..=search {
         let c = guess.round() as i64 + d;
-        let m = if horizontal {
-            g.mean(span.0 as i64, c, span.1 as i64, c + 1)
-        } else {
-            g.mean(c, span.0 as i64, c + 1, span.1 as i64)
-        };
+        let m = if horizontal { g.mean(span.0 as i64, c, span.1 as i64, c + 1) } else { g.mean(c, span.0 as i64, c + 1, span.1 as i64) };
         if m < best.1 {
             best = (c as f64 + 0.5, m);
         }
@@ -106,11 +102,21 @@ fn find_ticks(g: &Gray, inner: &RectF, horizontal: bool, axis_pos: f64) -> Vec<f
         // Grid line: long run of slightly darker pixels across the plot.
         let grid = if horizontal {
             let m = g.mean(t, inner.y0 as i64 + 3, t + 1, inner.y1 as i64 - 3);
-            let bg = g.mean(t + 3, inner.y0 as i64 + 3, t + 6, inner.y1 as i64 - 3).max(g.mean(t - 6, inner.y0 as i64 + 3, t - 3, inner.y1 as i64 - 3));
+            let bg = g.mean(t + 3, inner.y0 as i64 + 3, t + 6, inner.y1 as i64 - 3).max(g.mean(
+                t - 6,
+                inner.y0 as i64 + 3,
+                t - 3,
+                inner.y1 as i64 - 3,
+            ));
             bg - m > 12.0
         } else {
             let m = g.mean(inner.x0 as i64 + 3, t, inner.x1 as i64 - 3, t + 1);
-            let bg = g.mean(inner.x0 as i64 + 3, t + 3, inner.x1 as i64 - 3, t + 6).max(g.mean(inner.x0 as i64 + 3, t - 6, inner.x1 as i64 - 3, t - 3));
+            let bg = g.mean(inner.x0 as i64 + 3, t + 3, inner.x1 as i64 - 3, t + 6).max(g.mean(
+                inner.x0 as i64 + 3,
+                t - 6,
+                inner.x1 as i64 - 3,
+                t - 3,
+            ));
             bg - m > 12.0
         };
         if frac >= 0.75 || grid {
@@ -153,16 +159,8 @@ fn superscript_value(text: &str) -> Option<f64> {
 
 /// Fit value = a + b*px (or log10) to (px, value, idx) samples by exhaustive-pair RANSAC.
 fn ransac(samples: &[(f64, f64, usize)], log: bool, tol_px: f64) -> Option<AxisFit> {
-    let pts: Vec<(f64, f64, usize)> = samples
-        .iter()
-        .filter_map(|&(p, v, i)| {
-            if log {
-                (v > 0.0).then(|| (p, v.log10(), i))
-            } else {
-                Some((p, v, i))
-            }
-        })
-        .collect();
+    let pts: Vec<(f64, f64, usize)> =
+        samples.iter().filter_map(|&(p, v, i)| if log { (v > 0.0).then(|| (p, v.log10(), i)) } else { Some((p, v, i)) }).collect();
     if pts.len() < 2 {
         return None;
     }
@@ -267,7 +265,11 @@ pub fn fit_axis(items: &[TextItem], role: TextRole, ticks: &[f64], horizontal: b
             let pos: Vec<f64> = s.iter().map(|x| x.1).filter(|v| *v > 0.0).collect();
             let mx = pos.iter().cloned().fold(f64::MIN, f64::max);
             let mn = pos.iter().cloned().fold(f64::MAX, f64::min);
-            if pos.len() >= 2 { mx / mn } else { 1.0 }
+            if pos.len() >= 2 {
+                mx / mn
+            } else {
+                1.0
+            }
         };
         if span(&plain) >= 20.0 {
             if let Some(f) = ransac(&plain, true, tol_fit) {
@@ -315,7 +317,8 @@ pub fn fit_axis(items: &[TextItem], role: TextRole, ticks: &[f64], horizontal: b
                 *counts.entry(*o).or_insert(0) += 1;
             }
             let base = counts.into_iter().max_by_key(|(o, c)| (*c, -o.abs())).map(|(o, _)| o).unwrap_or(0);
-            let seq: Vec<(f64, f64, usize)> = pos.iter().enumerate().map(|(rank, (p, i, _))| (*p, 10f64.powi(base + rank as i32), *i)).collect();
+            let seq: Vec<(f64, f64, usize)> =
+                pos.iter().enumerate().map(|(rank, (p, i, _))| (*p, 10f64.powi(base + rank as i32), *i)).collect();
             if let Some(mut f) = ransac(&seq, true, tol_fit) {
                 f.prior = 2;
                 cands.push(f);
@@ -323,13 +326,7 @@ pub fn fit_axis(items: &[TextItem], role: TextRole, ticks: &[f64], horizontal: b
         }
     }
     // Most inliers, then lowest residual; a log fit must beat linear clearly.
-    cands.sort_by(|x, y| {
-        y.inliers
-            .len()
-            .cmp(&x.inliers.len())
-            .then(y.prior.cmp(&x.prior))
-            .then(x.rms_px.partial_cmp(&y.rms_px).unwrap())
-    });
+    cands.sort_by(|x, y| y.inliers.len().cmp(&x.inliers.len()).then(y.prior.cmp(&x.prior)).then(x.rms_px.partial_cmp(&y.rms_px).unwrap()));
     cands.into_iter().next()
 }
 
@@ -413,7 +410,12 @@ pub fn infer_axes(gray: &GrayImage, panel: &Panel, items: &[TextItem]) -> AxesRe
                         vec![Pt::new(y_axis_x, p1), Pt::new(y_axis_x, p2)]
                     };
                     conf = (f.inliers.len() as f64 / 5.0).min(1.0) * 0.9;
-                    notes.push(format!("Value axis: {} labels fit ({}{}).", f.inliers.len(), if f.log { "log" } else { "linear" }, outlier_note(f)));
+                    notes.push(format!(
+                        "Value axis: {} labels fit ({}{}).",
+                        f.inliers.len(),
+                        if f.log { "log" } else { "linear" },
+                        outlier_note(f)
+                    ));
                 }
             } else {
                 notes.push("Could not read the value-axis labels; place P1 and P2 by hand.".into());
@@ -435,7 +437,13 @@ pub fn infer_axes(gray: &GrayImage, panel: &Panel, items: &[TextItem]) -> AxesRe
                     notes.push(format!(
                         "X: {} labels fit a {} scale{}.",
                         f.inliers.len(),
-                        if f.date { "date" } else if f.log { "log" } else { "linear" },
+                        if f.date {
+                            "date"
+                        } else if f.log {
+                            "log"
+                        } else {
+                            "linear"
+                        },
                         outlier_note(f)
                     ));
                 }
@@ -453,7 +461,13 @@ pub fn infer_axes(gray: &GrayImage, panel: &Panel, items: &[TextItem]) -> AxesRe
                     notes.push(format!(
                         "Y: {} labels fit a {} scale{}.",
                         f.inliers.len(),
-                        if f.date { "date" } else if f.log { "log" } else { "linear" },
+                        if f.date {
+                            "date"
+                        } else if f.log {
+                            "log"
+                        } else {
+                            "linear"
+                        },
                         outlier_note(f)
                     ));
                 }

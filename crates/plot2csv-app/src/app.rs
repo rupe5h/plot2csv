@@ -183,10 +183,7 @@ impl Plot2CsvApp {
     // ------------------------------------------------------------- loading
 
     pub fn open_image_dialog(&mut self, ctx: &egui::Context) {
-        self.file_job = Some((
-            FilePurpose::Image,
-            platform::pick_file(ctx, &[("Images", &["png", "jpg", "jpeg", "gif", "bmp", "webp"])]),
-        ));
+        self.file_job = Some((FilePurpose::Image, platform::pick_file(ctx, &[("Images", &["png", "jpg", "jpeg", "gif", "bmp", "webp"])])));
     }
 
     pub fn open_project_dialog(&mut self, ctx: &egui::Context) {
@@ -635,7 +632,9 @@ impl Plot2CsvApp {
         ui.vertical_centered(|ui| {
             let r = widgets::magnifier(ui, tex.as_ref(), size, self.mag_center, self.mag_zoom, side);
             let gear = egui::Rect::from_min_size(r.right_top() + Vec2::new(-22.0, 2.0), Vec2::splat(20.0));
-            let gr = ui.interact(gear, ui.scope_id().with("mag_gear"), egui::Sense::click()).on_hover_text(format!("Magnifier zoom {}× (click to change)", self.mag_zoom));
+            let gr = ui
+                .interact(gear, ui.scope_id().with("mag_gear"), egui::Sense::click())
+                .on_hover_text(format!("Magnifier zoom {}× (click to change)", self.mag_zoom));
             ui.painter().rect_filled(gear, 3.0, Color32::from_white_alpha(200));
             icons::paint(ui, Icon::Gear, gear.center(), 14.0, Color32::from_gray(60));
             if gr.clicked() {
@@ -665,16 +664,14 @@ impl Plot2CsvApp {
         }
         let footer_h = 96.0;
         let avail = ui.available_height() - footer_h;
-        egui::ScrollArea::vertical().max_height(avail.max(100.0)).auto_shrink([false, false]).show(ui, |ui| {
-            match self.stage {
-                Stage::Import => self.import_sidebar(ui, ctx),
-                Stage::Correct => self.correct_sidebar(ui, ctx),
-                Stage::Region => self.region_sidebar(ui, ctx),
-                Stage::Text => self.text_sidebar(ui, ctx),
-                Stage::Axes => self.axes_sidebar(ui, ctx),
-                Stage::Data => self.data_sidebar(ui, ctx),
-                Stage::Export => self.export_sidebar(ui, ctx),
-            }
+        egui::ScrollArea::vertical().max_height(avail.max(100.0)).auto_shrink([false, false]).show(ui, |ui| match self.stage {
+            Stage::Import => self.import_sidebar(ui, ctx),
+            Stage::Correct => self.correct_sidebar(ui, ctx),
+            Stage::Region => self.region_sidebar(ui, ctx),
+            Stage::Text => self.text_sidebar(ui, ctx),
+            Stage::Axes => self.axes_sidebar(ui, ctx),
+            Stage::Data => self.data_sidebar(ui, ctx),
+            Stage::Export => self.export_sidebar(ui, ctx),
         });
         // Footer: approve / re-run / reset
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
@@ -692,10 +689,20 @@ impl Plot2CsvApp {
                 }
                 ui.horizontal(|ui| {
                     let has_auto = !matches!(self.stage, Stage::Import);
-                    if has_auto && ui.add_enabled(!self.is_busy(), egui::Button::new((icons::image(ui, Icon::ArrowsRotate), "Re-run auto"))).on_hover_text("Discard edits and run the automatic step again").clicked() {
+                    if has_auto
+                        && ui
+                            .add_enabled(!self.is_busy(), egui::Button::new((icons::image(ui, Icon::ArrowsRotate), "Re-run auto")))
+                            .on_hover_text("Discard edits and run the automatic step again")
+                            .clicked()
+                    {
                         self.run_auto(ctx, self.stage);
                     }
-                    if has_auto && ui.button((icons::image(ui, Icon::RotateLeft), "Reset to auto")).on_hover_text("Restore the last automatic proposal").clicked() {
+                    if has_auto
+                        && ui
+                            .button((icons::image(ui, Icon::RotateLeft), "Reset to auto"))
+                            .on_hover_text("Restore the last automatic proposal")
+                            .clicked()
+                    {
                         self.reset_stage_to_auto();
                     }
                 });
@@ -889,17 +896,17 @@ impl Plot2CsvApp {
             (None, Some(_)) => "Reading text (OCR)…".to_string(),
             _ => return,
         };
-        egui::Area::new(egui::Id::unique("busy"))
-            .order(egui::Order::Foreground)
-            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
-            .show(ctx, |ui| {
+        egui::Area::new(egui::Id::unique("busy")).order(egui::Order::Foreground).anchor(Align2::CENTER_CENTER, Vec2::ZERO).show(
+            ctx,
+            |ui| {
                 egui::Frame::popup(ui.style()).inner_margin(16.0).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spinner();
                         ui.label(egui::RichText::new(msg).size(18.0));
                     });
                 });
-            });
+            },
+        );
     }
 }
 

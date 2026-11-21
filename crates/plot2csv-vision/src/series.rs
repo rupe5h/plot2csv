@@ -165,9 +165,8 @@ pub fn track_curves(bm: &Bitmap, region: &RectF, max_jump: f64, max_gap: f64) ->
             })
             .collect();
         // Tracks in a crossing: another track predicts nearly the same y.
-        let crossing: Vec<bool> = (0..open.len())
-            .map(|i| (0..open.len()).any(|j| j != i && (preds[i] - preds[j]).abs() < 0.8 * max_jump))
-            .collect();
+        let crossing: Vec<bool> =
+            (0..open.len()).map(|i| (0..open.len()).any(|j| j != i && (preds[i] - preds[j]).abs() < 0.8 * max_jump)).collect();
         let mut cands: Vec<(f64, usize, usize)> = Vec::new();
         for (ti, o) in open.iter().enumerate() {
             let tol = 0.4 * max_jump + 0.25 * (xf - o.last_x).abs().min(3.0 * max_gap);
@@ -537,7 +536,10 @@ fn text_lines(items: &[TextItem], region: &RectF) -> Vec<RectF> {
         let word = items[k].value.is_none();
         let same = lines.iter_mut().find(|(l, _, _)| {
             let hm = l.height().max(b.height());
-            (l.center().y - b.center().y).abs() < 0.3 * hm && l.height() / b.height() < 1.45 && b.height() / l.height() < 1.45 && b.x0 - l.x1 < 1.5 * hm
+            (l.center().y - b.center().y).abs() < 0.3 * hm
+                && l.height() / b.height() < 1.45
+                && b.height() / l.height() < 1.45
+                && b.x0 - l.x1 < 1.5 * hm
         });
         match same {
             Some((l, n, w)) => {
@@ -1011,7 +1013,9 @@ pub fn detect_series(img: &RgbaImage, panel: &Panel, items: &[TextItem], cal: Op
     let grid_col = grid_lines(&faint, &ink, &excluded, w, h, &region, true);
     let (is_row, is_col) = (|y: usize| grid_row[y], |x: usize| grid_col[x]);
     let on_grid = |x: usize, y: usize| is_row(y) || is_col(x);
-    let off_grid_ink = |x: i64, y: i64| x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h && cand[y as usize * w + x as usize] && !on_grid(x as usize, y as usize);
+    let off_grid_ink = |x: i64, y: i64| {
+        x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h && cand[y as usize * w + x as usize] && !on_grid(x as usize, y as usize)
+    };
     let mut drop = Vec::new();
     for y in ry0..ry1 {
         for x in rx0..rx1 {
@@ -1020,7 +1024,9 @@ pub fn detect_series(img: &RgbaImage, panel: &Panel, items: &[TextItem], cal: Op
                 continue;
             }
             let (xi, yi) = (x as i64, y as i64);
-            let across = |dx: i64, dy: i64| (2..=3).any(|k| off_grid_ink(xi - k * dx, yi - k * dy)) && (2..=3).any(|k| off_grid_ink(xi + k * dx, yi + k * dy));
+            let across = |dx: i64, dy: i64| {
+                (2..=3).any(|k| off_grid_ink(xi - k * dx, yi - k * dy)) && (2..=3).any(|k| off_grid_ink(xi + k * dx, yi + k * dy))
+            };
             let keep = (!is_row(y) || across(0, 1)) && (!is_col(x) || across(1, 0));
             if !keep {
                 drop.push(i);
@@ -1066,10 +1072,8 @@ pub fn detect_series(img: &RgbaImage, panel: &Panel, items: &[TextItem], cal: Op
         }
     }
     let colors: Vec<[u8; 3]> = accepted.into_iter().map(|a| a.0).collect();
-    let mut clusters: Vec<Cluster> = colors
-        .iter()
-        .map(|&c| Cluster { color: c, lab: to_lab(c), fade: fade_path(c, bg), bits: vec![false; w * h], count: 0 })
-        .collect();
+    let mut clusters: Vec<Cluster> =
+        colors.iter().map(|&c| Cluster { color: c, lab: to_lab(c), fade: fade_path(c, bg), bits: vec![false; w * h], count: 0 }).collect();
     if clusters.is_empty() {
         return SeriesResult { datasets: vec![], note: "No data-coloured pixels found inside the plot area.".into() };
     }
@@ -1370,11 +1374,7 @@ impl<'a> CategoryLabels<'a> {
     /// Label of the category a bar at pixel `x` belongs to: the nearest label,
     /// if the bar lies within its group (about half the label spacing).
     pub fn at(&self, x: f64) -> Option<String> {
-        let (d, it) = self
-            .row
-            .iter()
-            .map(|it| ((it.bbox.center().x - x).abs(), *it))
-            .min_by(|a, b| a.0.total_cmp(&b.0))?;
+        let (d, it) = self.row.iter().map(|it| ((it.bbox.center().x - x).abs(), *it)).min_by(|a, b| a.0.total_cmp(&b.0))?;
         let reach = (0.5 * it.bbox.width()).max(0.6 * self.spacing).max(20.0);
         (d <= reach).then(|| it.text.trim().to_string())
     }
@@ -1631,7 +1631,10 @@ mod tests {
     /// every series, at bin centres, with y on the curve.
     #[test]
     fn curves_share_the_sampling_grid() {
-        let line = |x0: usize, x1: usize, f: &dyn Fn(f64) -> f64| Track { pts: (x0..x1).map(|x| (x as f64 + 0.5, f(x as f64 + 0.5))).collect(), slope: 0.0 };
+        let line = |x0: usize, x1: usize, f: &dyn Fn(f64) -> f64| Track {
+            pts: (x0..x1).map(|x| (x as f64 + 0.5, f(x as f64 + 0.5))).collect(),
+            slope: 0.0,
+        };
         let a = line(106, 500, &|x| 0.3 * x + 10.0);
         let b = line(117, 480, &|x| 200.0 - 0.1 * x);
         let (dx, x0) = (8.0, 100.0);

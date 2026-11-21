@@ -3,8 +3,8 @@
 
 use crate::backend::{Model, OcrBackend, Tensor};
 use image::GrayImage;
-use serde::{Deserialize, Serialize};
 use plot2csv_vision::raster::{component_stats, crop_gray, label_components, resize_gray};
+use serde::{Deserialize, Serialize};
 
 pub const INPUT_MULTIPLE: usize = 32;
 pub const OUT_STRIDE: f32 = 2.0;
@@ -52,10 +52,7 @@ impl IndraConfig {
     }
 
     pub fn decode(&self, ids: &[i64]) -> String {
-        ids.iter()
-            .filter(|&&i| i > 0 && (i as usize) <= self.chars.len())
-            .map(|&i| self.chars[i as usize - 1].as_str())
-            .collect()
+        ids.iter().filter(|&&i| i > 0 && (i as usize) <= self.chars.len()).map(|&i| self.chars[i as usize - 1].as_str()).collect()
     }
 }
 
@@ -76,11 +73,7 @@ pub fn page_to_input(gray: &GrayImage, long_side: u32) -> (Vec<f32>, usize, usiz
     let scale = long_side as f32 / h.max(w);
     let nh = ((h * scale).round() as u32).max(1);
     let nw = ((w * scale).round() as u32).max(1);
-    let resized = if (nh, nw) != (gray.height(), gray.width()) {
-        resize_gray(gray, nw, nh, scale < 1.0)
-    } else {
-        gray.clone()
-    };
+    let resized = if (nh, nw) != (gray.height(), gray.width()) { resize_gray(gray, nw, nh, scale < 1.0) } else { gray.clone() };
     let ph = (nh as usize).div_ceil(INPUT_MULTIPLE) * INPUT_MULTIPLE;
     let pw = (nw as usize).div_ceil(INPUT_MULTIPLE) * INPUT_MULTIPLE;
     let mut out = vec![0f32; ph * pw];
@@ -240,10 +233,7 @@ pub fn width_batches(widths: &[usize], max_batch: usize) -> Vec<Vec<usize>> {
         let wi = widths[i].max(min_width);
         if let Some(last) = batches.last_mut() {
             let w0 = widths[last[0]].max(min_width);
-            if last.len() < max_batch
-                && wi as f32 <= max_ratio * w0 as f32
-                && (last.len() + 1) * wi <= max_area
-            {
+            if last.len() < max_batch && wi as f32 <= max_ratio * w0 as f32 && (last.len() + 1) * wi <= max_area {
                 last.push(i);
                 continue;
             }
@@ -273,9 +263,7 @@ pub async fn detect(backend: &dyn OcrBackend, cfg: &IndraConfig, gray: &GrayImag
 pub async fn detect_at(backend: &dyn OcrBackend, _cfg: &IndraConfig, gray: &GrayImage, base_side: u32) -> anyhow::Result<Vec<[f32; 5]>> {
     let run = |long_side: u32| async move {
         let (x, ph, pw, s) = page_to_input(gray, long_side);
-        let out = backend
-            .run(Model::Det, vec![("x", Tensor::f32(vec![1, 1, ph, pw], x))], &["out"])
-            .await?;
+        let out = backend.run(Model::Det, vec![("x", Tensor::f32(vec![1, 1, ph, pw], x))], &["out"]).await?;
         let t = &out[0];
         let (c, h, w) = (t.dims[1], t.dims[2], t.dims[3]);
         anyhow::ensure!(c >= 3, "det output has {c} channels");
@@ -317,20 +305,10 @@ fn median_sorted(v: &[f32]) -> f32 {
 }
 
 /// Recognise the given line boxes (page px).
-pub async fn recognize(
-    backend: &dyn OcrBackend,
-    cfg: &IndraConfig,
-    gray: &GrayImage,
-    boxes: &[[f32; 4]],
-) -> anyhow::Result<Vec<TextLine>> {
-    let crops: Vec<LineCrop> = boxes
-        .iter()
-        .map(|b| crop_line(gray, b, cfg.rec_height, cfg.rec_window.max(1), is_dark_line(gray, b)))
-        .collect();
-    let mut out: Vec<TextLine> = boxes
-        .iter()
-        .map(|b| TextLine { bbox: *b, text: String::new(), conf: 0.0, chars: Vec::new() })
-        .collect();
+pub async fn recognize(backend: &dyn OcrBackend, cfg: &IndraConfig, gray: &GrayImage, boxes: &[[f32; 4]]) -> anyhow::Result<Vec<TextLine>> {
+    let crops: Vec<LineCrop> =
+        boxes.iter().map(|b| crop_line(gray, b, cfg.rec_height, cfg.rec_window.max(1), is_dark_line(gray, b))).collect();
+    let mut out: Vec<TextLine> = boxes.iter().map(|b| TextLine { bbox: *b, text: String::new(), conf: 0.0, chars: Vec::new() }).collect();
     let widths: Vec<usize> = crops.iter().map(|c| c.width).collect();
     for batch in width_batches(&widths, 64) {
         let hh = crops[batch[0]].height;
@@ -349,10 +327,7 @@ pub async fn recognize(
         let res = backend
             .run(
                 Model::Rec,
-                vec![
-                    ("x", Tensor::f32(vec![batch.len(), 1, hh, wm], arr)),
-                    ("widths", Tensor::i64(vec![batch.len()], ws)),
-                ],
+                vec![("x", Tensor::f32(vec![batch.len(), 1, hh, wm], arr)), ("widths", Tensor::i64(vec![batch.len()], ws))],
                 &["ids", "conf", "lengths"],
             )
             .await?;
@@ -382,13 +357,8 @@ pub async fn recognize(
             line.conf = conf;
             if conf >= MIN_CONF {
                 line.text = cfg.decode(&kept_ids);
-                line.chars = kept_ids
-                    .iter()
-                    .zip(&kept_t)
-                    .map(|(&id, &t)| {
-                        (cfg.decode(&[id]), c.page_x0 + (t as f32 + 0.5) * stride * f)
-                    })
-                    .collect();
+                line.chars =
+                    kept_ids.iter().zip(&kept_t).map(|(&id, &t)| (cfg.decode(&[id]), c.page_x0 + (t as f32 + 0.5) * stride * f)).collect();
             }
         }
     }

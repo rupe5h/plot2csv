@@ -81,13 +81,7 @@ fn selection_eq(a: &Project, b: &Project) -> bool {
 
 impl History {
     pub fn new(p: &Project, stage: Stage) -> Self {
-        Self {
-            undo: Vec::new(),
-            redo: Vec::new(),
-            baseline: Entry { project: snapshot(p), stage },
-            absorb: false,
-            last_nudge: None,
-        }
+        Self { undo: Vec::new(), redo: Vec::new(), baseline: Entry { project: snapshot(p), stage }, absorb: false, last_nudge: None }
     }
 
     /// Start over with a new document. Its first settled frame becomes the

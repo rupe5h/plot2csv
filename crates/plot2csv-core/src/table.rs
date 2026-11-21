@@ -55,12 +55,8 @@ pub struct Row {
 
 /// Compute rows (data values for every point) in the requested order.
 pub fn rows(cal: &Calibration, ds: &Dataset, opts: &TableOptions) -> Vec<Row> {
-    let mut rows: Vec<Row> = ds
-        .points
-        .iter()
-        .enumerate()
-        .map(|(i, p)| Row { label: p.label.clone(), values: cal.to_data(p.pt()), index: i })
-        .collect();
+    let mut rows: Vec<Row> =
+        ds.points.iter().enumerate().map(|(i, p)| Row { label: p.label.clone(), values: cal.to_data(p.pt()), index: i }).collect();
     match opts.sort_by {
         SortBy::Raw => {}
         SortBy::Column(c) => {
@@ -120,7 +116,11 @@ pub struct AxisTitles {
 impl AxisTitles {
     pub fn from_items(items: &[TextItem]) -> Self {
         let title = |role: TextRole| {
-            items.iter().find(|it| it.role == role).map(|it| it.text.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|t| !t.is_empty())
+            items
+                .iter()
+                .find(|it| it.role == role)
+                .map(|it| it.text.split_whitespace().collect::<Vec<_>>().join(" "))
+                .filter(|t| !t.is_empty())
         };
         Self { x: title(TextRole::XTitle), y: title(TextRole::YTitle) }
     }
@@ -172,13 +172,7 @@ pub fn format_rows(cal: &Calibration, rows: &[Row], opts: &TableOptions, titles:
 pub fn csv_join(cells: &[String], sep: &str) -> String {
     cells
         .iter()
-        .map(|c| {
-            if c.contains(sep) || c.contains('"') || c.contains('\n') {
-                format!("\"{}\"", c.replace('"', "\"\""))
-            } else {
-                c.clone()
-            }
-        })
+        .map(|c| if c.contains(sep) || c.contains('"') || c.contains('\n') { format!("\"{}\"", c.replace('"', "\"\"")) } else { c.clone() })
         .collect::<Vec<_>>()
         .join(sep)
 }
@@ -221,7 +215,8 @@ mod tests {
             manual: false,
             vertical: false,
         };
-        let titles = AxisTitles::from_items(&[item("Frequency  [Hz]", TextRole::XTitle), item("Pseudo-acceleration [g]", TextRole::YTitle)]);
+        let titles =
+            AxisTitles::from_items(&[item("Frequency  [Hz]", TextRole::XTitle), item("Pseudo-acceleration [g]", TextRole::YTitle)]);
         assert_eq!(headers(&xy, &titles), vec!["Frequency [Hz]", "Pseudo-acceleration [g]"]);
         // Only one title: the other column keeps its variable name.
         let x_only = AxisTitles { x: Some("Time, s".into()), y: None };

@@ -39,7 +39,13 @@ pub fn arrow_nudge(ctx: &egui::Context) -> Option<egui::Vec2> {
         return None;
     }
     ctx.input(|i| {
-        let step = if i.modifiers.shift { 10.0 } else if i.modifiers.alt { 0.25 } else { 1.0 };
+        let step = if i.modifiers.shift {
+            10.0
+        } else if i.modifiers.alt {
+            0.25
+        } else {
+            1.0
+        };
         let mut d = egui::Vec2::ZERO;
         if i.key_pressed(egui::Key::ArrowLeft) {
             d.x -= step;

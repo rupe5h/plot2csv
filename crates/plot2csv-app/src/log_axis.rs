@@ -29,7 +29,8 @@ pub fn grid_marks(input: GridInput) -> Vec<GridMark> {
     let mut marks: Vec<(f64, u32)> = Vec::new();
 
     // Decades: every `steps[0]` of them; multiples of the bigger steps are coarser.
-    let steps: Vec<i64> = (0..12).flat_map(|e| [1, 2, 5].map(|f| f * 10i64.pow(e))).skip_while(|&s| (s as f64) < min_step).take(6).collect();
+    let steps: Vec<i64> =
+        (0..12).flat_map(|e| [1, 2, 5].map(|f| f * 10i64.pow(e))).skip_while(|&s| (s as f64) < min_step).take(6).collect();
     let Some(&every) = steps.first() else { return Vec::new() };
     let finest = steps.len() as u32 - 1;
     let mut n = (lo / every as f64).ceil() as i64 * every;
@@ -65,12 +66,7 @@ pub fn grid_marks(input: GridInput) -> Vec<GridMark> {
 
     marks.sort_by(|a, b| a.0.total_cmp(&b.0));
     let gaps = gaps_to_coarser(&marks);
-    marks
-        .iter()
-        .zip(gaps)
-        .filter(|&(_, gap)| gap >= min_step)
-        .map(|(&(value, _), step_size)| GridMark { value, step_size })
-        .collect()
+    marks.iter().zip(gaps).filter(|&(_, gap)| gap >= min_step).map(|(&(value, _), step_size)| GridMark { value, step_size }).collect()
 }
 
 /// For each (sorted) mark, the distance to the nearest mark on either side whose level is not

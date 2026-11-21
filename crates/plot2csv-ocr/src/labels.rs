@@ -90,7 +90,11 @@ pub fn items_from_lines(lines: &[(TextLine, bool)], inner: &RectF) -> Vec<TextIt
         if l.text.trim().is_empty() {
             continue;
         }
-        let parts = if *vertical { vec![(RectF::new(l.bbox[0] as f64, l.bbox[1] as f64, l.bbox[2] as f64, l.bbox[3] as f64), l.text.clone())] } else { split_numeric_tokens(l) };
+        let parts = if *vertical {
+            vec![(RectF::new(l.bbox[0] as f64, l.bbox[1] as f64, l.bbox[2] as f64, l.bbox[3] as f64), l.text.clone())]
+        } else {
+            split_numeric_tokens(l)
+        };
         for (bbox, text) in parts {
             let cleaned = clean_label(&text);
             if cleaned.is_empty() {
@@ -196,7 +200,8 @@ fn category_ticks(items: &mut [TextItem], inner: &RectF) {
     }
     // Same row: centres within half a line height.
     let row_y = items[below[0]].bbox.center().y;
-    let row: Vec<usize> = below.iter().copied().filter(|&k| (items[k].bbox.center().y - row_y).abs() < 0.6 * items[k].bbox.height()).collect();
+    let row: Vec<usize> =
+        below.iter().copied().filter(|&k| (items[k].bbox.center().y - row_y).abs() < 0.6 * items[k].bbox.height()).collect();
     if row.len() >= 2 {
         for k in row {
             items[k].role = TextRole::XTick;
@@ -320,7 +325,15 @@ mod tests {
             bbox: [100.0, 500.0, 300.0, 512.0],
             text: "0 10 20".into(),
             conf: 0.9,
-            chars: vec![("0".into(), 105.0), (" ".into(), 150.0), ("1".into(), 196.0), ("0".into(), 204.0), (" ".into(), 250.0), ("2".into(), 286.0), ("0".into(), 294.0)],
+            chars: vec![
+                ("0".into(), 105.0),
+                (" ".into(), 150.0),
+                ("1".into(), 196.0),
+                ("0".into(), 204.0),
+                (" ".into(), 250.0),
+                ("2".into(), 286.0),
+                ("0".into(), 294.0),
+            ],
         };
         let parts = split_numeric_tokens(&l);
         assert_eq!(parts.len(), 3);

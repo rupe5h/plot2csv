@@ -153,7 +153,8 @@ impl Plot2CsvApp {
                 }
                 MeasureMode::Angle => {
                     if let Some(i) = meas.angles.iter().position(|a| {
-                        plot2csv_core::geom::point_segment_dist(p, a[0], a[1]) < tol || plot2csv_core::geom::point_segment_dist(p, a[1], a[2]) < tol
+                        plot2csv_core::geom::point_segment_dist(p, a[0], a[1]) < tol
+                            || plot2csv_core::geom::point_segment_dist(p, a[1], a[2]) < tol
                     }) {
                         meas.angles.remove(i);
                     }

@@ -94,27 +94,17 @@ pub mod native {
             Ok(Self { _env: env, det, rec })
         }
 
-        fn run_sync(
-            &self,
-            model: Model,
-            inputs: Vec<(&'static str, Tensor)>,
-            outputs: &[&'static str],
-        ) -> anyhow::Result<Vec<Tensor>> {
+        fn run_sync(&self, model: Model, inputs: Vec<(&'static str, Tensor)>, outputs: &[&'static str]) -> anyhow::Result<Vec<Tensor>> {
             let mut sess = match model {
                 Model::Det => self.det.lock().unwrap(),
                 Model::Rec => self.rec.lock().unwrap(),
             };
-            let mut feed: Vec<(std::borrow::Cow<'static, str>, ort::session::SessionInputValue<'static>)> =
-                Vec::new();
+            let mut feed: Vec<(std::borrow::Cow<'static, str>, ort::session::SessionInputValue<'static>)> = Vec::new();
             for (name, t) in inputs {
                 let shape: Vec<i64> = t.dims.iter().map(|&d| d as i64).collect();
                 let v: ort::session::SessionInputValue<'static> = match t.data {
-                    TensorData::F32(d) => OrtTensor::from_array((shape, d))
-                        .map_err(|e| anyhow::anyhow!("{e}"))?
-                        .into(),
-                    TensorData::I64(d) => OrtTensor::from_array((shape, d))
-                        .map_err(|e| anyhow::anyhow!("{e}"))?
-                        .into(),
+                    TensorData::F32(d) => OrtTensor::from_array((shape, d)).map_err(|e| anyhow::anyhow!("{e}"))?.into(),
+                    TensorData::I64(d) => OrtTensor::from_array((shape, d)).map_err(|e| anyhow::anyhow!("{e}"))?.into(),
                 };
                 feed.push((name.into(), v));
             }

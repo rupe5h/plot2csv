@@ -18,8 +18,7 @@ pub enum AxesKind {
 }
 
 impl AxesKind {
-    pub const ALL: [AxesKind; 6] =
-        [AxesKind::Xy, AxesKind::Bar, AxesKind::Polar, AxesKind::Ternary, AxesKind::Map, AxesKind::Image];
+    pub const ALL: [AxesKind; 6] = [AxesKind::Xy, AxesKind::Bar, AxesKind::Polar, AxesKind::Ternary, AxesKind::Map, AxesKind::Image];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -114,15 +113,7 @@ pub struct PolarParams {
 
 impl Default for PolarParams {
     fn default() -> Self {
-        Self {
-            r1: "1".into(),
-            theta1: "0".into(),
-            r2: "2".into(),
-            theta2: "90".into(),
-            degrees: true,
-            clockwise: false,
-            log_r: false,
-        }
+        Self { r1: "1".into(), theta1: "0".into(), r2: "2".into(), theta2: "90".into(), degrees: true, clockwise: false, log_r: false }
     }
 }
 
@@ -195,10 +186,7 @@ impl Axes {
     /// Build the transform; errors explain what is missing or inconsistent.
     pub fn calibrate(&self) -> Result<Calibration, String> {
         if !self.points_complete() {
-            return Err(format!(
-                "place {} more calibration point(s)",
-                self.points_needed() - self.points.len()
-            ));
+            return Err(format!("place {} more calibration point(s)", self.points_needed() - self.points.len()));
         }
         let p = &self.points;
         match &self.params {
@@ -462,10 +450,7 @@ impl TernaryCal {
         let s = if self.range100 { 100.0 } else { 1.0 };
         let v = [d[0] / s, d[1] / s, d[2] / s];
         let [la, lb, lc] = if self.normal { v } else { [v[1], v[2], v[0]] };
-        Pt::new(
-            la * self.a.x + lb * self.b.x + lc * self.c.x,
-            la * self.a.y + lb * self.b.y + lc * self.c.y,
-        )
+        Pt::new(la * self.a.x + lb * self.b.x + lc * self.c.x, la * self.a.y + lb * self.b.y + lc * self.c.y)
     }
 }
 
@@ -587,9 +572,7 @@ mod tests {
     use super::*;
 
     fn xy(points: [Pt; 4], p: XyParams) -> Calibration {
-        Axes { kind: AxesKind::Xy, points: points.to_vec(), params: AxesParams::Xy(p), image_height: 600.0 }
-            .calibrate()
-            .unwrap()
+        Axes { kind: AxesKind::Xy, points: points.to_vec(), params: AxesParams::Xy(p), image_height: 600.0 }.calibrate().unwrap()
     }
 
     #[test]
@@ -622,7 +605,14 @@ mod tests {
     fn xy_log_and_date() {
         let c = xy(
             [Pt::new(0.0, 100.0), Pt::new(300.0, 100.0), Pt::new(0.0, 100.0), Pt::new(0.0, 0.0)],
-            XyParams { x1: "2020/01/01".into(), x2: "2020/01/31".into(), y1: "1".into(), y2: "1000".into(), log_y: true, ..Default::default() },
+            XyParams {
+                x1: "2020/01/01".into(),
+                x2: "2020/01/31".into(),
+                y1: "1".into(),
+                y2: "1000".into(),
+                log_y: true,
+                ..Default::default()
+            },
         );
         let d = c.to_data(Pt::new(150.0, 100.0 - 100.0 / 3.0));
         assert!((d[1] - 10.0).abs() < 1e-9);

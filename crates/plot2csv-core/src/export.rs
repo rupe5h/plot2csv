@@ -17,10 +17,7 @@ pub struct SeriesRef<'a> {
 }
 
 pub fn sanitize_filename(s: &str) -> String {
-    let t: String = s
-        .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
-        .collect();
+    let t: String = s.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' }).collect();
     let t = t.trim_matches('_').to_string();
     if t.is_empty() {
         "series".into()
@@ -269,15 +266,14 @@ mod tests {
         let mut b = Dataset::new("b");
         b.points = vec![DataPoint::new(1.0, 0.0)];
         let header = TableOptions { header: true, ..Default::default() };
-        let pair = [
-            SeriesRef { panel: "p", cal: &xy, ds: &a, titles: NO_TITLES },
-            SeriesRef { panel: "p", cal: &xy, ds: &b, titles: NO_TITLES },
-        ];
+        let pair =
+            [SeriesRef { panel: "p", cal: &xy, ds: &a, titles: NO_TITLES }, SeriesRef { panel: "p", cal: &xy, ds: &b, titles: NO_TITLES }];
         assert_eq!(wide_csv(&pair, &header).unwrap(), "X,a,b\n0,0,\n1,-1,0\n2,-2,\n");
         // Without the header row; with the X axis title as its header.
         assert_eq!(wide_csv(&pair, &TableOptions::default()).unwrap(), "0,0,\n1,-1,0\n2,-2,\n");
         let titles = AxisTitles { x: Some("Time [s]".into()), y: Some("Speed".into()) };
-        let titled = [SeriesRef { panel: "p", cal: &xy, ds: &a, titles: &titles }, SeriesRef { panel: "p", cal: &xy, ds: &b, titles: &titles }];
+        let titled =
+            [SeriesRef { panel: "p", cal: &xy, ds: &a, titles: &titles }, SeriesRef { panel: "p", cal: &xy, ds: &b, titles: &titles }];
         assert!(wide_csv(&titled, &header).unwrap().starts_with("Time [s],a,b\n"));
         assert!(series_csv(&titled[0], &TableOptions::default()).starts_with("Time [s],Speed\n"));
         assert!(long_csv(&titled, &TableOptions::default()).starts_with("panel,series,Time [s],Speed\n"));
@@ -296,7 +292,8 @@ mod tests {
         let mut eda = Dataset::new("EDA");
         eda.points = vec![bar(20.0, 70.0, "DS1"), bar(120.0, 40.0, "DS2"), bar(220.0, 30.0, "DS3")];
         let titles = AxisTitles { x: Some("Datasets".into()), y: Some("F1 (%)".into()) };
-        let s = [SeriesRef { panel: "p", cal: &cal, ds: &od, titles: &titles }, SeriesRef { panel: "p", cal: &cal, ds: &eda, titles: &titles }];
+        let s =
+            [SeriesRef { panel: "p", cal: &cal, ds: &od, titles: &titles }, SeriesRef { panel: "p", cal: &cal, ds: &eda, titles: &titles }];
         let opts = TableOptions { header: true, format: crate::NumFormat::Fixed, digits: 1, ..Default::default() };
         assert_eq!(wide_csv(&s, &opts).unwrap(), "Datasets,OD,EDA\nDS1,2.0,3.0\nDS2,5.0,6.0\nDS3,,7.0\n");
     }
@@ -306,7 +303,8 @@ mod tests {
         let cal = Axes::new(AxesKind::Image, 10.0).calibrate().unwrap();
         let mut a = Dataset::new("My series");
         a.points = vec![DataPoint::new(1.0, 2.0)];
-        let z = export_zip(&[SeriesRef { panel: "Plot 1", cal: &cal, ds: &a, titles: NO_TITLES }], &TableOptions::default(), Some("{}")).unwrap();
+        let z = export_zip(&[SeriesRef { panel: "Plot 1", cal: &cal, ds: &a, titles: NO_TITLES }], &TableOptions::default(), Some("{}"))
+            .unwrap();
         assert!(z.len() > 100);
         assert_eq!(&z[..2], b"PK");
     }

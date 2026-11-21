@@ -6,8 +6,8 @@ use plot2csv_core::project::{Correction, Stage};
 
 use super::{arrow_nudge, pos, pt};
 use crate::app::Plot2CsvApp;
-use crate::icons::{self, Icon};
 use crate::canvas::CanvasView;
+use crate::icons::{self, Icon};
 use crate::widgets;
 
 #[derive(Default)]
@@ -68,7 +68,10 @@ impl Plot2CsvApp {
 
         changed |= ui.checkbox(&mut corr.enabled, "Apply correction").changed();
         ui.add_enabled_ui(corr.enabled, |ui| {
-            ui.label(egui::RichText::new("Drag the four corners onto the plot frame (or any rectangle that should be square to the page).").weak());
+            ui.label(
+                egui::RichText::new("Drag the four corners onto the plot frame (or any rectangle that should be square to the page).")
+                    .weak(),
+            );
             ui.horizontal(|ui| {
                 ui.label("Rotate");
                 let r = ui.add(egui::Slider::new(&mut self.correct_ui.rotation, -45.0..=45.0).suffix("°").step_by(0.1));
@@ -145,7 +148,9 @@ impl Plot2CsvApp {
         }
         ui.add_space(6.0);
         ui.label(
-            egui::RichText::new("Tip: arrow keys nudge the selected corner (Shift = 10 px). Right-drag or middle-drag pans.").weak().small(),
+            egui::RichText::new("Tip: arrow keys nudge the selected corner (Shift = 10 px). Right-drag or middle-drag pans.")
+                .weak()
+                .small(),
         );
         let _ = ctx;
     }

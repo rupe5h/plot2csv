@@ -10,8 +10,8 @@ use plot2csv_core::NumFormat;
 
 use super::pos;
 use crate::app::Plot2CsvApp;
-use crate::icons::Icon;
 use crate::canvas::CanvasView;
+use crate::icons::Icon;
 use crate::log_axis;
 use crate::platform;
 use crate::widgets::{self, c32};
@@ -124,7 +124,8 @@ impl Plot2CsvApp {
                 for (pid, pname, bars) in &panels {
                     let n = all.iter().filter(|s| s.panel_id == *pid).count();
                     let all_label = format!("{}All series ({n})", panel_prefix(pname));
-                    if ui.selectable_label(sel == (*pid, None), all_label).on_hover_text("Every series of the panel as a column").clicked() {
+                    if ui.selectable_label(sel == (*pid, None), all_label).on_hover_text("Every series of the panel as a column").clicked()
+                    {
                         sel = (*pid, None);
                     }
                     if *bars {
@@ -177,10 +178,12 @@ impl Plot2CsvApp {
                         ui.selectable_value(&mut opts.sort_by, SortBy::NearestNeighbor, "Nearest Neighbor");
                     });
                     ui.add_enabled_ui(matches!(opts.sort_by, SortBy::Column(_)), |ui| {
-                        egui::ComboBox::from_id_salt("order").selected_text(if opts.ascending { "Ascending" } else { "Descending" }).show_ui(ui, |ui| {
-                            ui.selectable_value(&mut opts.ascending, true, "Ascending");
-                            ui.selectable_value(&mut opts.ascending, false, "Descending");
-                        });
+                        egui::ComboBox::from_id_salt("order")
+                            .selected_text(if opts.ascending { "Ascending" } else { "Descending" })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut opts.ascending, true, "Ascending");
+                                ui.selectable_value(&mut opts.ascending, false, "Descending");
+                            });
                     });
                 });
                 ui.end_row();
@@ -225,7 +228,8 @@ impl Plot2CsvApp {
                 let (name, csv) = match &one {
                     Some(s) => (format!("{base}_{}.csv", sanitize_filename(&s.ds.name)), series_csv(&s.as_ref(), &self.table_opts)),
                     None => {
-                        let suffix = if multi_panel { format!("{}_all_series", sanitize_filename(&first.panel)) } else { "all_series".into() };
+                        let suffix =
+                            if multi_panel { format!("{}_all_series", sanitize_filename(&first.panel)) } else { "all_series".into() };
                         let o = TableOptions { header: true, ..self.table_opts.clone() };
                         (format!("{base}_{suffix}.csv"), Self::all_series_table(&refs, &o))
                     }
@@ -238,7 +242,14 @@ impl Plot2CsvApp {
     pub fn export_sidebar(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
         widgets::section(ui, "⑦ Export all series");
         let all = self.all_series();
-        ui.label(egui::RichText::new(format!("{} series in {} panel(s).", all.len(), self.project.panel_list().iter().filter(|p| p.enabled).count())).weak());
+        ui.label(
+            egui::RichText::new(format!(
+                "{} series in {} panel(s).",
+                all.len(),
+                self.project.panel_list().iter().filter(|p| p.enabled).count()
+            ))
+            .weak(),
+        );
         ui.horizontal_wrapped(|ui| {
             if widgets::primary_button_icon(ui, Icon::Download, "Download all (ZIP)", !all.is_empty()).on_hover_text("One CSV per series, a combined long CSV, wide CSVs and the project").clicked() {
                 self.export_zip();

@@ -9,9 +9,9 @@ use plot2csv_vision::color::ColorCount;
 use super::region::to_rect;
 use super::{arrow_nudge, pos, pt};
 use crate::app::Plot2CsvApp;
-use crate::icons::{self, Icon};
 use crate::canvas::CanvasView;
 use crate::dialogs::Dialog;
+use crate::icons::{self, Icon};
 use crate::images::bitmap_texture;
 use crate::widgets::{self, c32};
 
@@ -264,13 +264,17 @@ impl Plot2CsvApp {
         let ink = painted
             .iter()
             .enumerate()
-            .filter(|(i, p)| **p && plot2csv_vision::color::lab_dist(plot2csv_vision::color::to_lab([raw[4 * i], raw[4 * i + 1], raw[4 * i + 2]]), bl) > 22.0)
+            .filter(|(i, p)| {
+                **p && plot2csv_vision::color::lab_dist(plot2csv_vision::color::to_lab([raw[4 * i], raw[4 * i + 1], raw[4 * i + 2]]), bl)
+                    > 22.0
+            })
             .count();
         if ink == 0 {
             return;
         }
         let palette = self.palette();
-        let hit = plot2csv_vision::color::filter_colors_among(&img, &ds.auto, Some(&painted), None, &palette).iter().filter(|b| **b).count();
+        let hit =
+            plot2csv_vision::color::filter_colors_among(&img, &ds.auto, Some(&painted), None, &palette).iter().filter(|b| **b).count();
         if hit as f64 >= 0.25 * ink as f64 {
             return;
         }
@@ -530,7 +534,8 @@ impl Plot2CsvApp {
                         self.data_ui.show_mask = true;
                     }
                 }
-                ui.toggle_value(&mut self.data_ui.show_mask, (icons::image(ui, Icon::Eye), "View")).on_hover_text("Show the selected dataset's mask (yellow)");
+                ui.toggle_value(&mut self.data_ui.show_mask, (icons::image(ui, Icon::Eye), "View"))
+                    .on_hover_text("Show the selected dataset's mask (yellow)");
                 if ui.small_button("Erase All").clicked() {
                     ds.auto.mask = None;
                     self.data_ui.mask = None;
@@ -559,7 +564,11 @@ impl Plot2CsvApp {
                     self.dialog = Some(Dialog::ColorPicker { background: ds.auto.color_mode == ColorMode::Background });
                 }
                 let pick = if ds.auto.color_mode == ColorMode::Foreground { Tool::PickFg } else { Tool::PickBg };
-                if ui.selectable_label(self.data_ui.tool == pick, (icons::image(ui, Icon::EyeDropper), "Pick")).on_hover_text("Pick the colour from the image").clicked() {
+                if ui
+                    .selectable_label(self.data_ui.tool == pick, (icons::image(ui, Icon::EyeDropper), "Pick"))
+                    .on_hover_text("Pick the colour from the image")
+                    .clicked()
+                {
                     self.data_ui.tool = pick;
                 }
             });
@@ -567,7 +576,9 @@ impl Plot2CsvApp {
             ui.label("Distance");
             ui.horizontal(|ui| {
                 ui.add(egui::DragValue::new(&mut ds.auto.distance).range(1.0..=442.0).speed(1.0));
-                if ui.toggle_value(&mut self.data_ui.show_filter, "Filter Colors").on_hover_text("Show which pixels match").clicked() && self.data_ui.show_filter {
+                if ui.toggle_value(&mut self.data_ui.show_filter, "Filter Colors").on_hover_text("Show which pixels match").clicked()
+                    && self.data_ui.show_filter
+                {
                     self.data_ui.filter_tex = None;
                 }
             });
@@ -596,7 +607,14 @@ impl Plot2CsvApp {
                 ui.label(egui::RichText::new("Generic").weak());
                 let opts: Vec<Algorithm> = vec![
                     Algorithm::AveragingWindow { dx: dx_def, dy: dx_def },
-                    Algorithm::XStepInterp { xmin: step_def.0, xstep: step_def.1, xmax: step_def.2, ymin: step_def.3, ymax: step_def.4, smoothing: 0.0 },
+                    Algorithm::XStepInterp {
+                        xmin: step_def.0,
+                        xstep: step_def.1,
+                        xmax: step_def.2,
+                        ymin: step_def.3,
+                        ymax: step_def.4,
+                        smoothing: 0.0,
+                    },
                     Algorithm::XStep { xmin: step_def.0, xstep: step_def.1, xmax: step_def.2, ymin: step_def.3, ymax: step_def.4 },
                     Algorithm::MultiTrack { tracks: 1, max_jump: 10.0, max_gap: 20.0 },
                 ];
@@ -679,7 +697,12 @@ impl Plot2CsvApp {
         let painter = ui.painter_at(view.rect);
         let img_rect = view.rect_to_screen(Rect::from_min_size(Pos2::ZERO, self.imgs.corrected_size()));
         if let Some(r) = self.panel_inner() {
-            painter.rect_stroke(view.rect_to_screen(to_rect(&r)), 0.0, Stroke::new(1.0, Color32::from_rgba_unmultiplied(0, 140, 255, 70)), StrokeKind::Middle);
+            painter.rect_stroke(
+                view.rect_to_screen(to_rect(&r)),
+                0.0,
+                Stroke::new(1.0, Color32::from_rgba_unmultiplied(0, 140, 255, 70)),
+                StrokeKind::Middle,
+            );
         }
         // Filter / mask overlays (automatic mode: the mask is what its tools use).
         let auto_mode = self.data_ui.mode == DataMode::Auto;
@@ -723,7 +746,11 @@ impl Plot2CsvApp {
         }
         // Live mask stroke / box preview.
         if !self.data_ui.stroke.is_empty() {
-            let col = if self.data_ui.tool == Tool::MaskErase { Color32::from_rgba_unmultiplied(255, 255, 255, 160) } else { Color32::from_rgba_unmultiplied(255, 230, 0, 140) };
+            let col = if self.data_ui.tool == Tool::MaskErase {
+                Color32::from_rgba_unmultiplied(255, 255, 255, 160)
+            } else {
+                Color32::from_rgba_unmultiplied(255, 230, 0, 140)
+            };
             let pts: Vec<Pos2> = self.data_ui.stroke.iter().map(|p| view.to_screen(*p)).collect();
             painter.add(egui::Shape::line(pts, Stroke::new(self.data_ui.pen_width * view.zoom, col)));
         }
@@ -749,7 +776,9 @@ impl Plot2CsvApp {
         // Pointer: crosshair where a click places something, a hand over a point that can be dragged.
         let over_point = view.hover.and_then(|p| nearest(&dss, p)).is_some();
         match self.data_ui.tool {
-            Tool::Add | Tool::MaskBox | Tool::MaskPen | Tool::MaskErase | Tool::PickFg | Tool::PickBg => view.set_cursor(CursorIcon::Crosshair),
+            Tool::Add | Tool::MaskBox | Tool::MaskPen | Tool::MaskErase | Tool::PickFg | Tool::PickBg => {
+                view.set_cursor(CursorIcon::Crosshair)
+            }
             Tool::Adjust if self.data_ui.dragging => view.set_cursor(CursorIcon::Grabbing),
             Tool::Adjust if over_point => view.set_cursor(CursorIcon::Grab),
             Tool::Delete if over_point => view.set_cursor(CursorIcon::PointingHand),

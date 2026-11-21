@@ -114,7 +114,8 @@ pub fn dominant_skew(ink: &Ink, vertical: bool, lo: f64, hi: f64, step: f64) -> 
         let t = a.to_radians();
         // project onto the normal of a line with direction angle t (horizontal family)
         // or t+90° (vertical family)
-        let (s, c) = if vertical { ((t + std::f64::consts::FRAC_PI_2).sin(), (t + std::f64::consts::FRAC_PI_2).cos()) } else { (t.sin(), t.cos()) };
+        let (s, c) =
+            if vertical { ((t + std::f64::consts::FRAC_PI_2).sin(), (t + std::f64::consts::FRAC_PI_2).cos()) } else { (t.sin(), t.cos()) };
         hist.iter_mut().for_each(|v| *v = 0);
         for &(x, y) in &pts {
             let r = -x * s + y * c + diag;
@@ -215,9 +216,7 @@ pub fn hough_segments(ink: &Ink, center_deg: f64, range_deg: f64, step_deg: f64,
         for (a, b) in line_runs(ink, phi, rho, 4.0, min_len) {
             // Skip near-duplicates of stronger lines (same line, overlapping extent).
             let dup = segs.iter().any(|s| {
-                (s.phi - phi).abs() < 1.5f64.to_radians()
-                    && (s.rho - rho).abs() < 4.0
-                    && overlap_1d(s, a, b) > 0.5 * a.dist(b).min(s.len())
+                (s.phi - phi).abs() < 1.5f64.to_radians() && (s.rho - rho).abs() < 4.0 && overlap_1d(s, a, b) > 0.5 * a.dist(b).min(s.len())
             });
             if !dup {
                 segs.push(Segment { a, b, phi, rho, votes: v });
@@ -329,12 +328,7 @@ pub fn refine_segment(g: &GrayImage, ink: &Ink, seg: &Segment) -> Option<Refined
     let dir = b.sub(a);
     let phi = dir.y.atan2(dir.x) + std::f64::consts::FRAC_PI_2;
     let rho = a.x * phi.cos() + a.y * phi.sin();
-    Some(Refined {
-        seg: Segment { a, b, phi, rho, votes: seg.votes },
-        rms,
-        bend,
-        coverage: kept.len() as f64 / (steps + 1) as f64,
-    })
+    Some(Refined { seg: Segment { a, b, phi, rho, votes: seg.votes }, rms, bend, coverage: kept.len() as f64 / (steps + 1) as f64 })
 }
 
 /// How much darker the segment is than its surroundings on its *less* bright

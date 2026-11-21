@@ -103,11 +103,7 @@ impl Images {
         let Some(src) = self.source.clone() else {
             return false;
         };
-        let corr = project
-            .correction
-            .value
-            .clone()
-            .unwrap_or_else(|| Correction::identity(src.width(), src.height()));
+        let corr = project.correction.value.clone().unwrap_or_else(|| Correction::identity(src.width(), src.height()));
         let key = correction_key(&corr);
         if self.corrected_key.as_deref() == Some(key.as_str()) && self.corrected.is_some() {
             return false;
@@ -133,13 +129,7 @@ impl Images {
 }
 
 /// Build an RGBA overlay texture from a bitmap (used for masks and colour filters).
-pub fn bitmap_texture(
-    ctx: &egui::Context,
-    name: &str,
-    w: usize,
-    h: usize,
-    pixel: impl Fn(usize) -> [u8; 4],
-) -> TextureHandle {
+pub fn bitmap_texture(ctx: &egui::Context, name: &str, w: usize, h: usize, pixel: impl Fn(usize) -> [u8; 4]) -> TextureHandle {
     let max = ctx.input(|i| i.max_texture_side);
     let step = w.max(h).div_ceil(max).max(1);
     let (tw, th) = (w.div_ceil(step), h.div_ceil(step));

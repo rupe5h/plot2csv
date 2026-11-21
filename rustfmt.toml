@@ -1,0 +1,14 @@
+# Stable-only options (toolchain is pinned to stable in rust-toolchain.toml).
+
+# Keep in sync with workspace.package.edition in Cargo.toml; set here so
+# running `rustfmt` directly on a file (not via cargo) parses it correctly.
+edition = "2021"
+
+# The codebase favours long single-line expressions, especially egui builder
+# chains. 140 columns with "Max" heuristics lets chains, calls, struct literals
+# and signatures use the full width instead of rustfmt's ~60% sub-limits.
+max_width = 140
+use_small_heuristics = "Max"
+
+use_field_init_shorthand = true
+use_try_shorthand = true

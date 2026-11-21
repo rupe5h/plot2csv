@@ -173,7 +173,12 @@ impl Tips {
                     if s != Stage::Export {
                         ui.add_space(2.0);
                         let weak = ui.visuals().weak_text_color();
-                        icons::rich_label(ui, "When it looks right, press Approve & continue {chevron-right} (or Enter).", egui::TextStyle::Body, weak);
+                        icons::rich_label(
+                            ui,
+                            "When it looks right, press Approve & continue {chevron-right} (or Enter).",
+                            egui::TextStyle::Body,
+                            weak,
+                        );
                     }
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {

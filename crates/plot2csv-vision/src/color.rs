@@ -160,7 +160,13 @@ fn rivals(fg: [u8; 3], bg: [u8; 3], palette: &[[u8; 3]]) -> Option<Rivals> {
 /// dominant colours) than for the foreground. Colours are compared with their
 /// anti-aliased shades, so grid lines, the soft edges of neighbouring curves
 /// and blends where curves cross stay out even within the colour distance.
-pub fn filter_colors_among(img: &RgbaImage, settings: &AutoSettings, mask: Option<&[bool]>, region: Option<RectF>, palette: &[[u8; 3]]) -> Vec<bool> {
+pub fn filter_colors_among(
+    img: &RgbaImage,
+    settings: &AutoSettings,
+    mask: Option<&[bool]>,
+    region: Option<RectF>,
+    palette: &[[u8; 3]],
+) -> Vec<bool> {
     let rival = match settings.color_mode {
         ColorMode::Foreground => rivals(settings.fg, settings.bg, palette),
         ColorMode::Background => None,
@@ -221,7 +227,8 @@ pub fn stroke_color(img: &RgbaImage, painted: &[bool], bg: [u8; 3]) -> Option<[u
         return None;
     }
     let r = RectF::new(x0 as f64, y0 as f64, x1 as f64, y1 as f64);
-    let cols: Vec<ColorCount> = dominant_colors(&tmp, Some(r), 8, 14.0).into_iter().filter(|c| lab_dist(to_lab(c.color), bl) > 22.0).collect();
+    let cols: Vec<ColorCount> =
+        dominant_colors(&tmp, Some(r), 8, 14.0).into_iter().filter(|c| lab_dist(to_lab(c.color), bl) > 22.0).collect();
     // Grid lines: light greys. Take a colour if one covers a fair share.
     let is_grid = |c: [u8; 3]| chroma(c) < 14.0 && to_lab(c)[0] > 45.0;
     let best = cols.iter().find(|c| !is_grid(c.color) && c.count as f64 >= 0.15 * n as f64).or(cols.first())?;

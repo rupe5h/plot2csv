@@ -71,13 +71,7 @@ impl ImageCanvas {
 
     /// Paint the image and handle navigation. `primary_drag_pans` lets the left
     /// button pan when no tool wants it.
-    pub fn show(
-        &mut self,
-        ui: &mut egui::Ui,
-        tex: Option<&TextureHandle>,
-        image_size: Vec2,
-        primary_drag_pans: bool,
-    ) -> CanvasView {
+    pub fn show(&mut self, ui: &mut egui::Ui, tex: Option<&TextureHandle>, image_size: Vec2, primary_drag_pans: bool) -> CanvasView {
         let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
         let rect = response.rect;
         self.last_rect = rect;
@@ -94,8 +88,7 @@ impl ImageCanvas {
 
         // Navigation: wheel zooms about the pointer, middle/secondary drag or space+drag pans.
         if response.hovered() {
-            let (scroll, zoom_delta, space) =
-                ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.key_down(egui::Key::Space)));
+            let (scroll, zoom_delta, space) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.key_down(egui::Key::Space)));
             let pointer = response.hover_pos();
             if zoom_delta != 1.0 {
                 self.zoom_by(zoom_delta, pointer);

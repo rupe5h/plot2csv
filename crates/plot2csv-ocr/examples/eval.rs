@@ -8,13 +8,13 @@
 
 use std::path::Path;
 
-use serde_json::Value;
 use plot2csv_core::axes::Calibration;
 use plot2csv_core::geom::Pt;
 use plot2csv_core::project::Panel;
 use plot2csv_ocr::backend::native::NativeOrt;
 use plot2csv_ocr::indra::{ocr_page, IndraConfig};
 use plot2csv_ocr::panel::{map_lines, merge_items, panel_crops};
+use serde_json::Value;
 
 fn block_on<F: std::future::Future>(f: F) -> F::Output {
     use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
@@ -93,7 +93,8 @@ fn main() -> anyhow::Result<()> {
         let gray = plot2csv_vision::raster::rgba_to_gray(&rgba);
         let corr = plot2csv_vision::correct::detect_correction(&gray);
         let c = &corr.correction;
-        let corrected = if c.enabled { plot2csv_vision::warp::warp_perspective(&rgba, &c.homography(), c.out_w, c.out_h) } else { rgba.clone() };
+        let corrected =
+            if c.enabled { plot2csv_vision::warp::warp_perspective(&rgba, &c.homography(), c.out_w, c.out_h) } else { rgba.clone() };
         let cgray = plot2csv_vision::raster::rgba_to_gray(&corrected);
         let regs = plot2csv_vision::regions::detect_panels(&cgray);
         if verbose {
@@ -113,7 +114,10 @@ fn main() -> anyhow::Result<()> {
             let panel = Panel { id: pi as u32 + 1, name: format!("p{pi}"), kind, inner: pg.inner, outer: pg.outer, enabled: true };
             if verbose {
                 let (i, o) = (&panel.inner, &panel.outer);
-                println!("   panel {pi} inner=({:.0},{:.0},{:.0},{:.0}) outer=({:.0},{:.0},{:.0},{:.0})", i.x0, i.y0, i.x1, i.y1, o.x0, o.y0, o.x1, o.y1);
+                println!(
+                    "   panel {pi} inner=({:.0},{:.0},{:.0},{:.0}) outer=({:.0},{:.0},{:.0},{:.0})",
+                    i.x0, i.y0, i.x1, i.y1, o.x0, o.y0, o.x1, o.y1
+                );
             }
             let mut collected = Vec::new();
             for cr in panel_crops(&cgray, &panel) {
@@ -128,7 +132,11 @@ fn main() -> anyhow::Result<()> {
                 let tagged: Vec<(plot2csv_ocr::TextLine, bool)> = lines.into_iter().zip(extra.iter().map(|e| e.1)).collect();
                 let new = plot2csv_ocr::panel::tick_items(&tagged);
                 if verbose {
-                    println!("      tick-guided OCR: {} boxes -> {:?}", boxes.len(), new.iter().map(|i| i.text.clone()).collect::<Vec<_>>());
+                    println!(
+                        "      tick-guided OCR: {} boxes -> {:?}",
+                        boxes.len(),
+                        new.iter().map(|i| i.text.clone()).collect::<Vec<_>>()
+                    );
                 }
                 items.extend(new);
             }
@@ -142,7 +150,10 @@ fn main() -> anyhow::Result<()> {
             }
             if verbose {
                 for it in &items {
-                    println!("      text {:?} {:?} value={:?} conf={:.2} box=({:.0},{:.0},{:.0},{:.0})", it.text, it.role, it.value, it.conf, it.bbox.x0, it.bbox.y0, it.bbox.x1, it.bbox.y1);
+                    println!(
+                        "      text {:?} {:?} value={:?} conf={:.2} box=({:.0},{:.0},{:.0},{:.0})",
+                        it.text, it.role, it.value, it.conf, it.bbox.x0, it.bbox.y0, it.bbox.x1, it.bbox.y1
+                    );
                 }
             }
             let ax = plot2csv_vision::axes_infer::infer_axes(&cgray, &panel, &items);
@@ -161,7 +172,15 @@ fn main() -> anyhow::Result<()> {
             if std::env::var("EVAL_POINTS").is_ok() {
                 println!("   cal points {:?}", ax.axes.points);
                 for ds in &res.datasets {
-                    let first: Vec<String> = ds.points.iter().take(4).map(|p| { let d = cal.to_data(Pt::new(p.x, p.y)); format!("({:.4},{:.4})@({:.1},{:.1})", d[0], d[1], p.x, p.y) }).collect();
+                    let first: Vec<String> = ds
+                        .points
+                        .iter()
+                        .take(4)
+                        .map(|p| {
+                            let d = cal.to_data(Pt::new(p.x, p.y));
+                            format!("({:.4},{:.4})@({:.1},{:.1})", d[0], d[1], p.x, p.y)
+                        })
+                        .collect();
                     println!("   {}: {}", ds.name, first.join(" "));
                 }
             }
@@ -194,7 +213,8 @@ fn main() -> anyhow::Result<()> {
             for ts in tp["series"].as_array().unwrap() {
                 let tname = ts["name"].as_str().unwrap_or("?");
                 let tkind = ts["kind"].as_str().unwrap_or("line");
-                let tpts: Vec<(f64, f64)> = ts["points"].as_array().unwrap().iter().map(|p| (p[0].as_f64().unwrap(), p[1].as_f64().unwrap())).collect();
+                let tpts: Vec<(f64, f64)> =
+                    ts["points"].as_array().unwrap().iter().map(|p| (p[0].as_f64().unwrap(), p[1].as_f64().unwrap())).collect();
                 // Score every detected dataset; keep the best.
                 let mut best: Option<(f64, f64, String, usize)> = None;
                 for ds in &res.datasets {
@@ -216,7 +236,9 @@ fn main() -> anyhow::Result<()> {
                                 .iter()
                                 .map(|t| {
                                     data.iter()
-                                        .map(|d| ((norm(d[0], tx) - norm(t.0, tx)).powi(2) + (norm(d[1], &ty) - norm(t.1, &ty)).powi(2)).sqrt())
+                                        .map(|d| {
+                                            ((norm(d[0], tx) - norm(t.0, tx)).powi(2) + (norm(d[1], &ty) - norm(t.1, &ty)).powi(2)).sqrt()
+                                        })
                                         .fold(f64::INFINITY, f64::min)
                                 })
                                 .collect();

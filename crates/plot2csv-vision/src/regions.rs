@@ -101,9 +101,8 @@ pub fn detect_panels(src: &GrayImage) -> RegionResult {
     cands.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
     let contains = |a: &RectF, b: &RectF| b.intersect(a).map(|r| r.area() / b.area().max(1e-9)).unwrap_or(0.0) > 0.9;
     let min_inset = (0.008 * w.max(h)).max(4.0);
-    let inset_in = |outer: &RectF, d: &RectF| {
-        [d.x0 - outer.x0, d.y0 - outer.y0, outer.x1 - d.x1, outer.y1 - d.y1].iter().all(|m| *m > min_inset)
-    };
+    let inset_in =
+        |outer: &RectF, d: &RectF| [d.x0 - outer.x0, d.y0 - outer.y0, outer.x1 - d.x1, outer.y1 - d.y1].iter().all(|m| *m > min_inset);
     let mut accepted: Vec<PanelGuess> = Vec::new();
     for (i, c) in cands.iter().enumerate() {
         let inside: Vec<&PanelGuess> =
@@ -120,9 +119,7 @@ pub fn detect_panels(src: &GrayImage) -> RegionResult {
         if inside.iter().any(|d| d.inner.area() > 0.35 * c.inner.area() && inset_in(&c.inner, &d.inner)) {
             continue;
         }
-        let overlaps = accepted.iter().any(|a| {
-            a.inner.iou(&c.inner) > 0.1 || contains(&a.inner, &c.inner) || contains(&c.inner, &a.inner)
-        });
+        let overlaps = accepted.iter().any(|a| a.inner.iou(&c.inner) > 0.1 || contains(&a.inner, &c.inner) || contains(&c.inner, &a.inner));
         if !overlaps && c.inner.area() > 0.03 * w * h {
             accepted.push(c.clone());
         }

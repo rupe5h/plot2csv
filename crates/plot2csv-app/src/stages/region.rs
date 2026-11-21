@@ -6,8 +6,8 @@ use plot2csv_core::geom::RectF;
 use plot2csv_core::project::{Panel, Stage};
 
 use crate::app::Plot2CsvApp;
-use crate::icons::{self, Icon};
 use crate::canvas::CanvasView;
+use crate::icons::{self, Icon};
 use crate::widgets;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -254,7 +254,13 @@ impl Plot2CsvApp {
             let col = Color32::from_rgba_unmultiplied(PANEL_COLOR.r(), PANEL_COLOR.g(), PANEL_COLOR.b(), alpha);
             painter.rect_filled(inner, 0.0, Color32::from_rgba_unmultiplied(0, 140, 255, if p.enabled { 18 } else { 6 }));
             painter.rect_stroke(inner, 0.0, Stroke::new(2.0, col), StrokeKind::Middle);
-            widgets::label_box(&painter, inner.left_top() + egui::vec2(4.0, 4.0), egui::Align2::LEFT_TOP, &format!("{} · {}", p.name, p.kind.label()), col);
+            widgets::label_box(
+                &painter,
+                inner.left_top() + egui::vec2(4.0, 4.0),
+                egui::Align2::LEFT_TOP,
+                &format!("{} · {}", p.name, p.kind.label()),
+                col,
+            );
             if self.region_ui.selected == Some(p.id) {
                 for r in [inner, outer] {
                     for c in [r.left_top(), r.right_top(), r.left_bottom(), r.right_bottom()] {
@@ -345,7 +351,12 @@ impl Plot2CsvApp {
                     } else if which == Which::Inner {
                         apply_handle(&mut p.inner, h, d);
                         // keep the outer box around the inner one
-                        p.outer = RectF::new(p.outer.x0.min(p.inner.x0), p.outer.y0.min(p.inner.y0), p.outer.x1.max(p.inner.x1), p.outer.y1.max(p.inner.y1));
+                        p.outer = RectF::new(
+                            p.outer.x0.min(p.inner.x0),
+                            p.outer.y0.min(p.inner.y0),
+                            p.outer.x1.max(p.inner.x1),
+                            p.outer.y1.max(p.inner.y1),
+                        );
                     } else {
                         apply_handle(&mut p.outer, h, d);
                     }

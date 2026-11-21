@@ -39,10 +39,7 @@ pub fn pick_file(ctx: &egui::Context, filters: &[(&str, &[&str])]) -> Receiver<P
 
 /// Run a (possibly heavy) closure off the UI path when the platform allows,
 /// delivering its result through a channel and requesting a repaint.
-pub fn run_job<T: Send + 'static>(
-    ctx: &egui::Context,
-    f: impl FnOnce() -> T + Send + 'static,
-) -> Receiver<T> {
+pub fn run_job<T: Send + 'static>(ctx: &egui::Context, f: impl FnOnce() -> T + Send + 'static) -> Receiver<T> {
     let (tx, rx) = channel();
     let ctx = ctx.clone();
     spawn_blocking(move || {

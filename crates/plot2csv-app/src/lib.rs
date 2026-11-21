@@ -24,14 +24,10 @@ mod web_entry {
         console_error_panic_hook::set_once();
         eframe::WebLogger::init(log::LevelFilter::Info).ok();
         let doc = web_sys::window().unwrap().document().unwrap();
-        let canvas: web_sys::HtmlCanvasElement = doc
-            .get_element_by_id(&canvas_id)
-            .ok_or_else(|| JsValue::from_str("canvas not found"))?
-            .dyn_into()?;
+        let canvas: web_sys::HtmlCanvasElement =
+            doc.get_element_by_id(&canvas_id).ok_or_else(|| JsValue::from_str("canvas not found"))?.dyn_into()?;
         let runner = eframe::WebRunner::new();
-        runner
-            .start(canvas, eframe::WebOptions::default(), Box::new(|cc| Ok(Box::new(crate::Plot2CsvApp::new(cc)))))
-            .await?;
+        runner.start(canvas, eframe::WebOptions::default(), Box::new(|cc| Ok(Box::new(crate::Plot2CsvApp::new(cc))))).await?;
         // Keep the runner alive for the page lifetime.
         std::mem::forget(runner);
         Ok(())

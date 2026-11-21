@@ -77,7 +77,8 @@ impl Window {
             return None;
         }
         let (w, h) = ((x1 - x0) as usize, (y1 - y0) as usize);
-        let mask: Vec<bool> = (0..w * h).map(|i| g.get_pixel((x0 + (i % w) as i64) as u32, (y0 + (i / w) as i64) as u32).0[0] < INK).collect();
+        let mask: Vec<bool> =
+            (0..w * h).map(|i| g.get_pixel((x0 + (i % w) as i64) as u32, (y0 + (i / w) as i64) as u32).0[0] < INK).collect();
         let (labels, n) = label_components(&mask, w, h, true);
         let comps = component_stats(&labels, n, w)
             .iter()
@@ -105,7 +106,8 @@ impl Window {
         let gy1 = comps.iter().map(|c| c.y1).fold(f64::MIN, f64::max) as i64 + 1;
         let label_at = |x: i64, y: i64| -> Option<u32> {
             let (lx, ly) = (x - self.x0, y - self.y0);
-            (lx >= 0 && ly >= 0 && (lx as usize) < self.w && (ly as usize) < self.h).then(|| self.labels[ly as usize * self.w + lx as usize])
+            (lx >= 0 && ly >= 0 && (lx as usize) < self.w && (ly as usize) < self.h)
+                .then(|| self.labels[ly as usize * self.w + lx as usize])
         };
         let mut px = Vec::new();
         for y in gy0..gy1 {
@@ -165,7 +167,8 @@ fn split_power(win: &Window, label: &RectF) -> Option<(Vec<Comp>, Vec<Comp>)> {
     if hh < 5.0 {
         return None;
     }
-    let mut main: Vec<Comp> = comps.iter().copied().filter(|c| in_label(c) && c.h() >= 0.5 * hh && (c.y1 - baseline).abs() <= 0.15 * hh + 1.0).collect();
+    let mut main: Vec<Comp> =
+        comps.iter().copied().filter(|c| in_label(c) && c.h() >= 0.5 * hh && (c.y1 - baseline).abs() <= 0.15 * hh + 1.0).collect();
     if main.len() < 2 {
         return None;
     }
@@ -175,9 +178,16 @@ fn split_power(win: &Window, label: &RectF) -> Option<(Vec<Comp>, Vec<Comp>)> {
     // base to sitting right on top of it (a minus is a short dash), chained
     // right after the base.
     let sup_glyph = |c: &Comp| {
-        c.h() >= 0.45 * hh && c.h() <= 0.9 * hh && c.y1 <= baseline - 0.25 * hh && c.y1 >= top - 0.1 * hh && c.y0 <= top + 0.15 * hh && c.y0 >= top - 0.8 * hh
+        c.h() >= 0.45 * hh
+            && c.h() <= 0.9 * hh
+            && c.y1 <= baseline - 0.25 * hh
+            && c.y1 >= top - 0.1 * hh
+            && c.y0 <= top + 0.15 * hh
+            && c.y0 >= top - 0.8 * hh
     };
-    let sup_dash = |c: &Comp| c.h() <= (0.2 * hh).max(2.0) && c.w() >= c.h() && c.w() <= 0.9 * hh && c.cy() >= top - 0.5 * hh && c.cy() <= baseline - 0.45 * hh;
+    let sup_dash = |c: &Comp| {
+        c.h() <= (0.2 * hh).max(2.0) && c.w() >= c.h() && c.w() <= 0.9 * hh && c.cy() >= top - 0.5 * hh && c.cy() <= baseline - 0.45 * hh
+    };
     let in_band = |c: &Comp| c.y1 > top - 0.7 * hh && c.y0 < baseline;
     let main_ids: Vec<u32> = main.iter().map(|c| c.id).collect();
     let mut right: Vec<Comp> = comps.iter().copied().filter(|c| c.x0 >= last - 1.0 && in_band(c) && !main_ids.contains(&c.id)).collect();
@@ -200,7 +210,8 @@ fn split_power(win: &Window, label: &RectF) -> Option<(Vec<Comp>, Vec<Comp>)> {
     }
     let exp_ids: Vec<u32> = exp.iter().map(|c| c.id).collect();
     // Base: the label's glyphs left of the exponent (sign, multiplier, ×, "10").
-    let base: Vec<Comp> = comps.iter().copied().filter(|c| in_label(c) && in_band(c) && c.x1 <= last + 1.0 && !exp_ids.contains(&c.id)).collect();
+    let base: Vec<Comp> =
+        comps.iter().copied().filter(|c| in_label(c) && in_band(c) && c.x1 <= last + 1.0 && !exp_ids.contains(&c.id)).collect();
     Some((base, exp))
 }
 
@@ -319,7 +330,8 @@ pub fn apply_power_labels(items: &mut [TextItem], scan: &PowerScan, lines: &[Tex
         let Some(e) = exponent(&el.text) else { continue };
         let it = &mut items[pl.item];
         // Fall back to the first pass when the base alone was not readable.
-        let Some(base) = power_base(&bl.text).or_else(|| normalize_number_text(&it.text).starts_with("10").then(|| "10".to_string())) else {
+        let Some(base) = power_base(&bl.text).or_else(|| normalize_number_text(&it.text).starts_with("10").then(|| "10".to_string()))
+        else {
             continue;
         };
         let text = format!("{base}^{e}");
@@ -393,7 +405,12 @@ mod tests {
         assert_eq!(scan.boxes.len(), 2);
         // The canvas holds the exponent glyphs and nothing of the axis.
         let b = scan.boxes[1];
-        let ink = |x0: f32, x1: f32, y0: f32, y1: f32| (y0 as u32..y1 as u32).flat_map(|y| (x0 as u32..x1 as u32).map(move |x| (x, y))).filter(|&(x, y)| scan.canvas.get_pixel(x, y).0[0] < INK).count();
+        let ink = |x0: f32, x1: f32, y0: f32, y1: f32| {
+            (y0 as u32..y1 as u32)
+                .flat_map(|y| (x0 as u32..x1 as u32).map(move |x| (x, y)))
+                .filter(|&(x, y)| scan.canvas.get_pixel(x, y).0[0] < INK)
+                .count()
+        };
         assert!(ink(b[0], b[2], b[1], b[3]) > 10);
         assert_eq!(ink(b[2] + 1.0, scan.canvas.width() as f32, b[1] - 3.0, b[3] + 3.0), 0);
 

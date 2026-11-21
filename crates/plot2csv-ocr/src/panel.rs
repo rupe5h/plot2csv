@@ -83,13 +83,10 @@ pub fn merge_items(collected: Vec<(TextLine, bool)>, inner: &RectF) -> Vec<TextI
         l.text.chars().filter(|c| !c.is_whitespace()).count() <= 2 && r.width() <= 1.5 * v.width() && overlap(&r, v)
     };
     let words: Vec<RectF> = collected.iter().filter(|(l, v)| *v && word(l)).map(|(l, _)| rect(l)).collect();
-    let collected: Vec<(TextLine, bool)> =
-        collected.into_iter().filter(|(l, v)| *v || !words.iter().any(|w| fragment_of(l, w))).collect();
+    let collected: Vec<(TextLine, bool)> = collected.into_iter().filter(|(l, v)| *v || !words.iter().any(|w| fragment_of(l, w))).collect();
     let horizontal: Vec<RectF> = collected.iter().filter(|(_, v)| !v).map(|(l, _)| rect(l)).collect();
-    let lines: Vec<(TextLine, bool)> = collected
-        .into_iter()
-        .filter(|(l, v)| !v || (word(l) && !horizontal.iter().any(|h| overlap(h, &rect(l)))))
-        .collect();
+    let lines: Vec<(TextLine, bool)> =
+        collected.into_iter().filter(|(l, v)| !v || (word(l) && !horizontal.iter().any(|h| overlap(h, &rect(l))))).collect();
     items_from_lines(&lines, inner)
 }
 
@@ -123,10 +120,8 @@ mod tests {
     #[test]
     fn vertical_read_under_wide_text_is_dropped() {
         let inner = RectF::new(92.0, 15.0, 688.0, 422.0);
-        let collected = vec![
-            line([10.0, 150.0, 85.0, 165.0], "Amplitude", 0.95, false),
-            line([30.0, 140.0, 40.0, 200.0], "ldmA", 0.7, true),
-        ];
+        let collected =
+            vec![line([10.0, 150.0, 85.0, 165.0], "Amplitude", 0.95, false), line([30.0, 140.0, 40.0, 200.0], "ldmA", 0.7, true)];
         let items = merge_items(collected, &inner);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].text, "Amplitude");
@@ -145,7 +140,8 @@ pub fn missing_tick_label_boxes(g: &GrayImage, panel: &Panel, items: &[TextItem]
     let mut out = Vec::new();
     // Typical label height from existing tick labels.
     let lh = {
-        let mut hs: Vec<f64> = items.iter().filter(|i| matches!(i.role, TextRole::XTick | TextRole::YTick)).map(|i| i.bbox.height()).collect();
+        let mut hs: Vec<f64> =
+            items.iter().filter(|i| matches!(i.role, TextRole::XTick | TextRole::YTick)).map(|i| i.bbox.height()).collect();
         hs.sort_by(|a, b| a.partial_cmp(b).unwrap());
         hs.get(hs.len() / 2).copied().unwrap_or(0.025 * inner.height()).clamp(6.0, 40.0)
     };
@@ -164,17 +160,21 @@ pub fn missing_tick_label_boxes(g: &GrayImage, panel: &Panel, items: &[TextItem]
             .iter()
             .skip(1)
             .filter(|s| s.area > 0 && (s.height() as f64) < 2.5 * lh && (s.width() as f64) < 6.0 * lh)
-            .map(|s| ((x0 + s.left as i64) as f64, (y0 + s.top as i64) as f64, (x0 + s.right as i64 + 1) as f64, (y0 + s.bottom as i64 + 1) as f64))
+            .map(|s| {
+                (
+                    (x0 + s.left as i64) as f64,
+                    (y0 + s.top as i64) as f64,
+                    (x0 + s.right as i64 + 1) as f64,
+                    (y0 + s.bottom as i64 + 1) as f64,
+                )
+            })
             .collect();
         // Seed: the glyph-sized component nearest the target.
-        let seed = comps
-            .iter()
-            .filter(|c| (c.3 - c.1) >= 0.4 * lh)
-            .min_by(|a, b| {
-                let da = (((a.0 + a.2) / 2.0 - target.0).powi(2) + ((a.1 + a.3) / 2.0 - target.1).powi(2)).sqrt();
-                let db = (((b.0 + b.2) / 2.0 - target.0).powi(2) + ((b.1 + b.3) / 2.0 - target.1).powi(2)).sqrt();
-                da.partial_cmp(&db).unwrap()
-            })?;
+        let seed = comps.iter().filter(|c| (c.3 - c.1) >= 0.4 * lh).min_by(|a, b| {
+            let da = (((a.0 + a.2) / 2.0 - target.0).powi(2) + ((a.1 + a.3) / 2.0 - target.1).powi(2)).sqrt();
+            let db = (((b.0 + b.2) / 2.0 - target.0).powi(2) + ((b.1 + b.3) / 2.0 - target.1).powi(2)).sqrt();
+            da.partial_cmp(&db).unwrap()
+        })?;
         let mut bx = *seed;
         loop {
             let mut grown = false;
@@ -183,7 +183,8 @@ pub fn missing_tick_label_boxes(g: &GrayImage, panel: &Panel, items: &[TextItem]
                 if inside {
                     continue;
                 }
-                let v_overlap = (c.3.min(bx.3) - c.1.max(bx.1)) > 0.3 * (c.3 - c.1).min(bx.3 - bx.1).max(1.0) || ((c.1 + c.3) / 2.0 > bx.1 && (c.1 + c.3) / 2.0 < bx.3);
+                let v_overlap = (c.3.min(bx.3) - c.1.max(bx.1)) > 0.3 * (c.3 - c.1).min(bx.3 - bx.1).max(1.0)
+                    || ((c.1 + c.3) / 2.0 > bx.1 && (c.1 + c.3) / 2.0 < bx.3);
                 let gap = (c.0 - bx.2).max(bx.0 - c.2);
                 if v_overlap && gap < 0.7 * lh {
                     bx = (bx.0.min(c.0), bx.1.min(c.1), bx.2.max(c.2), bx.3.max(c.3));

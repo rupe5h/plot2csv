@@ -45,11 +45,7 @@ pub fn rgba_to_gray(img: &RgbaImage) -> GrayImage {
 }
 
 fn gray_to_f32(img: &GrayImage) -> GrayF32 {
-    GrayF32 {
-        width: img.width() as usize,
-        height: img.height() as usize,
-        data: img.as_raw().iter().map(|&v| v as f32).collect(),
-    }
+    GrayF32 { width: img.width() as usize, height: img.height() as usize, data: img.as_raw().iter().map(|&v| v as f32).collect() }
 }
 
 fn f32_to_gray(img: &GrayF32) -> GrayImage {
@@ -261,10 +257,7 @@ impl ComponentStats {
 }
 
 pub fn component_stats(labels: &[u32], count: u32, width: usize) -> Vec<ComponentStats> {
-    let mut st = vec![
-        ComponentStats { left: usize::MAX, top: usize::MAX, ..Default::default() };
-        count as usize + 1
-    ];
+    let mut st = vec![ComponentStats { left: usize::MAX, top: usize::MAX, ..Default::default() }; count as usize + 1];
     for (i, &l) in labels.iter().enumerate() {
         if l == 0 {
             continue;

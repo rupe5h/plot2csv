@@ -50,9 +50,9 @@ pub fn ocr_available() -> bool {
 #[cfg(feature = "native-ocr")]
 mod ocr {
     use super::*;
-    use std::sync::{Arc, OnceLock};
     use plot2csv_ocr::backend::native::NativeOrt;
     use plot2csv_ocr::IndraConfig;
+    use std::sync::{Arc, OnceLock};
 
     static ENGINE: OnceLock<Result<(Arc<NativeOrt>, IndraConfig), String>> = OnceLock::new();
 
@@ -76,11 +76,7 @@ mod ocr {
             .clone()
     }
 
-    pub fn run_ocr(
-        ctx: &egui::Context,
-        gray: image::GrayImage,
-        boxes: Option<Vec<[f32; 4]>>,
-    ) -> Receiver<Result<Vec<TextLine>, String>> {
+    pub fn run_ocr(ctx: &egui::Context, gray: image::GrayImage, boxes: Option<Vec<[f32; 4]>>) -> Receiver<Result<Vec<TextLine>, String>> {
         let (tx, rx) = channel();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
@@ -104,11 +100,7 @@ mod ocr {
 pub use ocr::run_ocr;
 
 #[cfg(not(feature = "native-ocr"))]
-pub fn run_ocr(
-    _ctx: &egui::Context,
-    _gray: image::GrayImage,
-    _boxes: Option<Vec<[f32; 4]>>,
-) -> Receiver<Result<Vec<TextLine>, String>> {
+pub fn run_ocr(_ctx: &egui::Context, _gray: image::GrayImage, _boxes: Option<Vec<[f32; 4]>>) -> Receiver<Result<Vec<TextLine>, String>> {
     let (tx, rx) = channel();
     let _ = tx.send(Err("OCR needs the `native-ocr` feature in native builds".into()));
     rx

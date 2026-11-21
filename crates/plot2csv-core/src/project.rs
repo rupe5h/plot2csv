@@ -24,8 +24,7 @@ pub enum Stage {
 }
 
 impl Stage {
-    pub const ALL: [Stage; 7] =
-        [Stage::Import, Stage::Correct, Stage::Region, Stage::Text, Stage::Axes, Stage::Data, Stage::Export];
+    pub const ALL: [Stage; 7] = [Stage::Import, Stage::Correct, Stage::Region, Stage::Text, Stage::Axes, Stage::Data, Stage::Export];
 
     pub fn title(self) -> &'static str {
         match self {
@@ -406,9 +405,7 @@ impl Project {
             }
             Stage::Correct => self.correction.status,
             Stage::Region => self.regions.status,
-            Stage::Text | Stage::Axes | Stage::Data => {
-                self.active_work().map(|w| w.status(stage)).unwrap_or(StageStatus::Pending)
-            }
+            Stage::Text | Stage::Axes | Stage::Data => self.active_work().map(|w| w.status(stage)).unwrap_or(StageStatus::Pending),
             Stage::Export => {
                 if self.active_work().map(|w| w.data.is_approved()).unwrap_or(false) {
                     StageStatus::Proposed
@@ -424,10 +421,7 @@ impl Project {
     pub fn can_open(&self, stage: Stage) -> bool {
         match stage.prev() {
             None => true,
-            Some(prev) => {
-                self.status(prev) == StageStatus::Approved
-                    || !matches!(self.status(stage), StageStatus::Pending)
-            }
+            Some(prev) => self.status(prev) == StageStatus::Approved || !matches!(self.status(stage), StageStatus::Pending),
         }
     }
 

@@ -82,15 +82,11 @@ struct Outline {
 
 fn outline(icon: Icon) -> Outline {
     let svg = icon.svg();
-    let vb: Vec<f64> = attr(svg, "viewBox")
-        .map(|v| v.split_whitespace().filter_map(|n| n.parse().ok()).collect())
-        .unwrap_or_default();
+    let vb: Vec<f64> = attr(svg, "viewBox").map(|v| v.split_whitespace().filter_map(|n| n.parse().ok()).collect()).unwrap_or_default();
     assert!(vb.len() == 4 && vb[3] > 0.0, "{}.svg: bad viewBox", icon.name());
     let view = kurbo::Rect::new(vb[0], vb[1], vb[0] + vb[2], vb[1] + vb[3]);
     let d = svg.find("<path").and_then(|i| attr(&svg[i..], "d"));
-    let path = d
-        .and_then(|d| kurbo::BezPath::from_svg(d).ok())
-        .unwrap_or_else(|| panic!("{}.svg: no parsable <path d=…>", icon.name()));
+    let path = d.and_then(|d| kurbo::BezPath::from_svg(d).ok()).unwrap_or_else(|| panic!("{}.svg: no parsable <path d=…>", icon.name()));
     let frame = view.union(kurbo::Shape::bounding_box(&path));
     Outline { path, view, frame }
 }
@@ -107,11 +103,7 @@ pub fn rasterize(icon: Icon, height_px: u32) -> ColorImage {
     ctx.fill_path(&o.path);
     let mut dest = vello_cpu::Pixmap::new(w, h);
     ctx.render(&mut dest, &mut vello_cpu::Resources::new());
-    let pixels = dest
-        .data_as_u8_slice()
-        .chunks_exact(4)
-        .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], p[3]))
-        .collect();
+    let pixels = dest.data_as_u8_slice().chunks_exact(4).map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], p[3])).collect();
     ColorImage::new([usize::from(w), usize::from(h)], pixels)
 }
 

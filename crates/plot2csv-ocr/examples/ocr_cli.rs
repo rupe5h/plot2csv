@@ -22,12 +22,16 @@ fn pollster_block_on<F: std::future::Future>(f: F) -> F::Output {
     // The native backend resolves immediately, so a trivial executor is enough.
     use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
     fn noop(_: *const ()) {}
-    fn clone(p: *const ()) -> RawWaker { RawWaker::new(p, &VT) }
+    fn clone(p: *const ()) -> RawWaker {
+        RawWaker::new(p, &VT)
+    }
     static VT: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
     let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VT)) };
     let mut cx = Context::from_waker(&waker);
     let mut f = Box::pin(f);
     loop {
-        if let Poll::Ready(v) = f.as_mut().poll(&mut cx) { return v; }
+        if let Poll::Ready(v) = f.as_mut().poll(&mut cx) {
+            return v;
+        }
     }
 }

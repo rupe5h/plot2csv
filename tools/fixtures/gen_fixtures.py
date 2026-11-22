@@ -234,4 +234,83 @@ json.dump({"panels": [{"x": {"min": 0.01, "max": 10, "log": True}, "y": {"min": 
      "series": [{"name": f"s{i}", "legend": " ".join(l.rstrip(" -") for l in lines), "kind": "line", "points": pts}
                 for i, (lines, _, _, pts) in enumerate(curves)]}]},
     open(os.path.join(OUT, "spectrum_grid.json"), "w"), indent=1)
+# 8. hazard_gray: a grayscale log-log hazard plot (matplotlib style) enlarged
+# from a small figure, so every stroke has soft edges a few pixels wide.
+# Light grey major and minor grid, a bundle of light grey curves of the same
+# shade (not in the legend), and black mean / dashed / dash-dot curves that
+# run through the bundle and meet at the top left. A framed legend, and the
+# dark strips a screenshot leaves on the left and bottom edges.
+def hazard(m, beta, lam=3.0):
+    def f(x):
+        q = 0.5 * math.erfc(math.log(x / m) / beta / math.sqrt(2))
+        return 1 - math.exp(-lam * q)
+    return f
+def pattern_line(d, P, col, width, pattern):
+    """Polyline P drawn with a dash pattern (on, off, on, off, ...) in px."""
+    dense = [P[0]]
+    for a, b in zip(P, P[1:]):
+        n = max(1, int(math.dist(a, b) / 0.5))
+        dense += [(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n) for k in range(1, n + 1)]
+    period, s, seg = sum(pattern), 0.0, []
+    def on(s):
+        t = s % period
+        for i, p in enumerate(pattern):
+            if t < p: return i % 2 == 0
+            t -= p
+        return False
+    for a, b in zip(dense, dense[1:]):
+        if on(s): seg.append(a)
+        elif len(seg) > 1: d.line(seg + [a], fill=col, width=width); seg = []
+        else: seg = []
+        s += math.dist(a, b)
+    if len(seg) > 1: d.line(seg, fill=col, width=width)
+S = 2
+FBB = lambda sz: ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial Bold.ttf", sz)
+im = Image.new("RGB", (640 * S, 520 * S), "white"); d = ImageDraw.Draw(im)
+ax = Axes(d, (106 * S, 6 * S, 628 * S, 462 * S), (0.0005, 2), (1e-4, 1.5), xlog=True, ylog=True)
+for e in range(-4, 1):
+    for k in range(1, 10):
+        v = k * 10.0 ** e
+        if 0.0005 <= v <= 2: x = ax.tx(v); d.line([x, ax.T, x, ax.B], fill=(205, 205, 205), width=S)
+        if 1e-4 <= v <= 1.5: y = ax.ty(v); d.line([ax.L, y, ax.R, y], fill=(205, 205, 205), width=S)
+xs = [0.0005 * (2 / 0.0005) ** (i / 600) for i in range(601)]
+m0, b0 = 0.00128, 1.705
+random.seed(11)
+for _ in range(60):
+    f = hazard(m0 * math.exp(random.gauss(0, 0.4)), b0 * math.exp(random.gauss(0, 0.05)))
+    P = [(ax.tx(x), ax.ty(f(x))) for x in xs if f(x) > 0.6e-4]
+    d.line(P, fill=(185, 185, 185), width=S)
+truth = []
+for name, m, width, pattern in (("mean", m0, 3, None), ("Quantile 0.95", 1.35 * m0, 2, (7.4, 3.2)),
+                                ("Quantile 0.05", 0.45 * m0, 2, (12.8, 3.2, 2, 3.2))):
+    f = hazard(m, b0); pts = [[x, f(x)] for x in xs if f(x) >= 1e-4]
+    P = [(ax.tx(x), ax.ty(y)) for x, y in pts]
+    if pattern: pattern_line(d, P, (0, 0, 0), width * S, [p * S for p in pattern])
+    else: d.line(P, fill=(0, 0, 0), width=width * S, joint="curve")
+    truth.append({"name": name, "legend": name, "kind": "line", "points": pts})
+d.rectangle([ax.L, ax.T, ax.R, ax.B], outline=(110, 110, 110), width=S)
+FB = FBB(17 * S)
+for v, s in ((0.0005, "0.0005"), (0.01, "0.01"), (0.1, "0.1"), (0.5, "0.5"), (1, "1"), (2, "2")):
+    x = ax.tx(v); d.line([x, ax.B, x, ax.B + 5 * S], fill=(110, 110, 110), width=S)
+    w = d.textlength(s, font=FB); d.text((x - w / 2, ax.B + 7 * S), s, fill="black", font=FB)
+for v, s in ((1, "1"), (0.1, "0.1"), (0.01, "0.01"), (0.001, "0.001"), (1e-4, "1e-04")):
+    y = ax.ty(v); d.line([ax.L - 5 * S, y, ax.L, y], fill=(110, 110, 110), width=S)
+    w = d.textlength(s, font=FB); d.text((ax.L - 8 * S - w, y - 10 * S), s, fill="black", font=FB)
+d.text((300 * S, 488 * S), "PGA [g]", fill="black", font=FBB(20 * S))
+title = Image.new("RGB", (330 * S, 26 * S), "white")
+ImageDraw.Draw(title).text((0, 0), "Annual probability of exceedance", fill="black", font=FBB(19 * S))
+im.paste(title.rotate(90, expand=True), (8 * S, 70 * S))
+LX, LY, FL = 112, 378, FBB(13 * S)
+d.rectangle([LX * S, LY * S, 262 * S, 456 * S], fill="white", outline=(205, 205, 205), width=S)
+for k, (t, width, pattern) in enumerate((("mean", 3, None), ("Quantile 0.95", 2, (7.4, 3.2)), ("Quantile 0.05", 2, (12.8, 3.2, 2, 3.2)))):
+    y = (LY + 14 + 24 * k) * S; P = [((LX + 8) * S, y), ((LX + 44) * S, y)]
+    if pattern: pattern_line(d, P, (0, 0, 0), width * S, [p * S for p in pattern])
+    else: d.line(P, fill=(0, 0, 0), width=width * S)
+    d.text(((LX + 52) * S, y - 9 * S), t, fill="black", font=FL)
+im = im.resize((640, 520), Image.LANCZOS).resize((1280, 1040), Image.BICUBIC)
+d = ImageDraw.Draw(im)
+d.rectangle([0, 0, 6, 1039], fill=(14, 14, 14)); d.line([0, 1039, 1279, 1039], fill=(14, 14, 14))
+im.save(os.path.join(OUT, "hazard_gray.png"))
+json.dump({"panels": [{"x": {"min": 0.0005, "max": 2, "log": True}, "y": {"min": 1e-4, "max": 1.5, "log": True}, "series": truth}]},
+          open(os.path.join(OUT, "hazard_gray.json"), "w"), indent=1)
 print("fixtures written to", OUT)

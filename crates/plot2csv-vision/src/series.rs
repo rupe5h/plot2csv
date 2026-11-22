@@ -170,18 +170,23 @@ pub fn track_curves(bm: &Bitmap, region: &RectF, max_jump: f64, max_gap: f64) ->
         let mut cands: Vec<(f64, usize, usize)> = Vec::new();
         for (ti, o) in open.iter().enumerate() {
             let tol = 0.4 * max_jump + 0.25 * (xf - o.last_x).abs().min(3.0 * max_gap);
-            for (ri, &(ry, _)) in runs.iter().enumerate() {
-                let d = (ry - preds[ti]).abs();
+            for (ri, &(ry, len)) in runs.iter().enumerate() {
+                // Distance to the run, not its centre: on a steep thick
+                // stroke a column's run is long, and near a dash's end its
+                // centre is well off the curve. The centre breaks ties.
+                let off = (ry - preds[ti]).abs();
+                let d = (off - 0.5 * len as f64).max(0.0) + 0.01 * off;
                 if d <= tol {
                     cands.push((d, ti, ri));
                 }
             }
         }
         cands.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-        let mut t_used = vec![false; open.len()];
+        // The run each track took in this column.
+        let mut t_used: Vec<Option<usize>> = vec![None; open.len()];
         let mut r_used = vec![false; runs.len()];
         for &(_, ti, ri) in &cands {
-            if t_used[ti] || r_used[ri] {
+            if t_used[ti].is_some() || r_used[ri] {
                 continue;
             }
             // A crossing track only takes a run that is clearly its own: no
@@ -192,7 +197,7 @@ pub fn track_curves(bm: &Bitmap, region: &RectF, max_jump: f64, max_gap: f64) ->
                     continue;
                 }
             }
-            t_used[ti] = true;
+            t_used[ti] = Some(ri);
             r_used[ri] = true;
             let o = &mut open[ti];
             o.t.pts.push((xf, runs[ri].0));
@@ -201,9 +206,20 @@ pub fn track_curves(bm: &Bitmap, region: &RectF, max_jump: f64, max_gap: f64) ->
                 o.t.slope = recent_slope(&o.t.pts, slope_win);
             }
         }
-        for (ri, &(ry, _)) in runs.iter().enumerate() {
-            // Don't spawn duplicates next to a coasting track.
-            if !r_used[ri] && !preds.iter().any(|p| (p - ry).abs() < max_jump) {
+        // Blank rows between two runs of a column.
+        let gap = |a: (f64, usize), b: (f64, usize)| (a.0 - b.0).abs() - 0.5 * (a.1 + b.1) as f64;
+        for (ri, &(ry, len)) in runs.iter().enumerate() {
+            // Don't spawn duplicates next to a coasting track, or splinters
+            // of the stroke a track just took. Beside a flat stretch, a run
+            // with clear background between it and that stroke is another
+            // curve, though close: two curves that run together and part (a
+            // mean and its quantile). On a steep one it is the curve's next
+            // dash.
+            let dup = (0..preds.len()).any(|ti| {
+                let apart = |tr: usize| gap(runs[tr], (ry, len)) > 2.0 && open[ti].t.slope.abs() < 1.0;
+                (preds[ti] - ry).abs() < max_jump && !t_used[ti].map(apart).unwrap_or(false)
+            });
+            if !r_used[ri] && !dup {
                 open.push(Open { t: Track { pts: vec![(xf, ry)], slope: 0.0 }, last_x: xf });
             }
         }
@@ -247,6 +263,12 @@ fn link_fragments(mut frags: Vec<Track>, max_jump: f64, max_gap: f64, slope_win:
                 let (fx, fy) = frags[j].first();
                 let dx = fx - lx;
                 if dx <= 0.0 || dx > 8.0 * max_gap {
+                    continue;
+                }
+                // A splinter (where curves cross the frame, say) only links
+                // across a gap like its own size; dashes and dots link to
+                // their neighbours first and grow into long pieces.
+                if dx > max_gap && dx > 4.0 * frags[i].span().min(frags[j].span()) {
                     continue;
                 }
                 let pred = ly + si * dx;
@@ -295,15 +317,25 @@ fn is_grid_like(t: &Track, color: [u8; 3]) -> bool {
 }
 
 /// Join tracks that do not overlap in x (pieces of one curve of this colour).
-fn join_disjoint(mut tracks: Vec<Track>) -> Vec<Track> {
+/// The pieces must line up: the later one starts near the earlier one's end
+/// carried on along its slope (more leeway across a wider gap, such as a
+/// legend box hiding the curve), so a curve of the same colour elsewhere is
+/// not tacked on.
+fn join_disjoint(mut tracks: Vec<Track>, max_jump: f64) -> Vec<Track> {
     tracks.sort_by(|a, b| b.pts.len().cmp(&a.pts.len()));
+    let continues = |a: &Track, b: &Track| {
+        let ((lx, ly), (fx, fy)) = (a.last(), b.first());
+        let dx = (fx - lx).max(0.0);
+        (fy - (ly + recent_slope(&a.pts, 24.0) * dx)).abs() <= max_jump + 1.5 * dx
+    };
     let mut out: Vec<Track> = Vec::new();
     for t in tracks {
         let (a0, a1) = (t.first().0, t.last().0);
         let target = out.iter_mut().find(|o| {
             let (b0, b1) = (o.first().0, o.last().0);
             let overlap = (a1.min(b1) - a0.max(b0)).max(0.0);
-            overlap < 0.1 * (a1 - a0).min(b1 - b0).max(1.0)
+            let lined_up = if a0 + a1 > b0 + b1 { continues(o, &t) } else { continues(&t, o) };
+            overlap < 0.1 * (a1 - a0).min(b1 - b0).max(1.0) && lined_up
         });
         match target {
             Some(o) => {
@@ -314,6 +346,205 @@ fn join_disjoint(mut tracks: Vec<Track>) -> Vec<Track> {
         }
     }
     out
+}
+
+/// A line's dash style, measured along the stroke: the inked share of its
+/// length, the share of its dashes that are dots (the short dashes between
+/// long ones of a dash-dot line) and the stroke width. Curves and legend
+/// swatches are measured the same way, so curves of one colour can be told
+/// apart and matched to their legend entries.
+#[derive(Clone, Copy, Debug)]
+struct LineStyle {
+    cov: f64,
+    dots: f64,
+    width: f64,
+}
+
+impl LineStyle {
+    /// From pieces of the stroke sampled every pixel along it (inked or
+    /// not) and its width. A one-pixel blank (where something crosses) does
+    /// not break a dash, and a piece's end runs, which can be cut short, are
+    /// not counted as dashes, except on a legend swatch (`whole`): it is
+    /// too short to leave any out, and starts its pattern at its left end.
+    fn from_profiles(pieces: &[Vec<bool>], width: f64, whole: bool) -> Option<LineStyle> {
+        let (mut inked, mut total) = (0usize, 0usize);
+        let mut dashes: Vec<usize> = Vec::new();
+        for on in pieces {
+            let mut runs: Vec<(bool, usize)> = Vec::new();
+            for (k, &b) in on.iter().enumerate() {
+                let speck = !b && k > 0 && k + 1 < on.len() && on[k - 1] && on[k + 1];
+                let b = b || speck;
+                match runs.last_mut() {
+                    Some((v, n)) if *v == b => *n += 1,
+                    _ => runs.push((b, 1)),
+                }
+            }
+            let start = runs.iter().position(|r| r.0);
+            let end = runs.iter().rposition(|r| r.0);
+            let (Some(s), Some(e)) = (start, end) else { continue };
+            let runs = &runs[s..=e];
+            total += runs.iter().map(|r| r.1).sum::<usize>();
+            inked += runs.iter().filter(|r| r.0).map(|r| r.1).sum::<usize>();
+            let on_runs: Vec<usize> = runs.iter().filter(|r| r.0).map(|r| r.1).collect();
+            if whole {
+                dashes.extend(&on_runs);
+            } else if on_runs.len() > 2 {
+                dashes.extend(&on_runs[1..on_runs.len() - 1]);
+            }
+        }
+        if total < 12 {
+            return None;
+        }
+        let dots = if dashes.len() >= 2 {
+            let mut sorted = dashes.clone();
+            sorted.sort_unstable();
+            let long = sorted[sorted.len() * 3 / 4] as f64;
+            dashes.iter().filter(|d| (**d as f64) < 0.5 * long).count() as f64 / dashes.len() as f64
+        } else {
+            0.0
+        };
+        Some(LineStyle { cov: inked as f64 / total as f64, dots, width })
+    }
+
+    fn solid(&self) -> bool {
+        self.cov > 0.9
+    }
+
+    fn word(&self) -> &'static str {
+        if self.solid() {
+            "solid"
+        } else if self.dots >= 0.3 {
+            "dash-dot"
+        } else if self.cov < 0.6 {
+            "dotted"
+        } else {
+            "dashed"
+        }
+    }
+
+    /// How unlike two styles are (0 = the same).
+    fn dist(&self, o: &LineStyle) -> f64 {
+        2.0 * (self.cov - o.cov).abs() + 1.5 * (self.dots - o.dots).abs() + (self.width.max(1.0) / o.width.max(1.0)).ln().abs()
+    }
+}
+
+/// The dash style of a tracked curve, measured along its centre line (the
+/// track's samples smoothed over a few columns). Column runs can't show the
+/// gaps of a sloping dashed line: a thick stroke's ends overlap in x.
+/// Steep stretches, where column samples are coarse, are left out, as are
+/// gaps the tracker coasted over.
+fn track_style(t: &Track, bits: &[bool], w: usize, h: usize) -> Option<LineStyle> {
+    let pts = &t.pts;
+    let n = pts.len();
+    if n < 5 {
+        return None;
+    }
+    let smooth: Vec<(f64, f64)> = (0..n)
+        .map(|k| {
+            let x = pts[k].0;
+            let near: Vec<f64> = pts[k.saturating_sub(3)..(k + 4).min(n)].iter().filter(|p| (p.0 - x).abs() <= 3.5).map(|p| p.1).collect();
+            (x, near.iter().sum::<f64>() / near.len() as f64)
+        })
+        .collect();
+    let inked = |x: f64, y: f64| {
+        let (xi, yi) = (x.floor() as i64, y.floor() as i64);
+        xi >= 0 && yi >= 0 && (xi as usize) < w && (yi as usize) < h && bits[yi as usize * w + xi as usize]
+    };
+    let mut pieces: Vec<Vec<bool>> = vec![Vec::new()];
+    let mut widths: Vec<usize> = Vec::new();
+    for k in 0..n - 1 {
+        let (a, b) = (smooth[k], smooth[k + 1]);
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        if dx > 12.0 || dy.abs() > 2.0 * dx {
+            if !pieces.last().unwrap().is_empty() {
+                pieces.push(Vec::new());
+            }
+            continue;
+        }
+        let len = dx.hypot(dy);
+        let (ux, uy) = (dx / len, dy / len);
+        let steps = len.round().max(1.0) as usize;
+        for s in 0..steps {
+            let f = s as f64 / steps as f64;
+            let (x, y) = (a.0 + dx * f, a.1 + dy * f);
+            // Within a pixel of the centre line, across the stroke.
+            let hit = (-1..=1).any(|o| inked(x - uy * o as f64, y + ux * o as f64));
+            pieces.last_mut().unwrap().push(hit);
+            if hit && s == 0 {
+                let across = |sign: f64| (1..20).take_while(|&o| inked(x - sign * uy * o as f64, y + sign * ux * o as f64)).count();
+                if inked(x, y) {
+                    widths.push(1 + across(1.0) + across(-1.0));
+                }
+            }
+        }
+    }
+    widths.sort_unstable();
+    let width = widths.get(widths.len() / 2).copied().unwrap_or(1) as f64;
+    LineStyle::from_profiles(&pieces, width, false)
+}
+
+/// The dash style of a legend swatch (a horizontal line sample) from its
+/// pixels of the series colour: inked columns along its centre row, and the
+/// median height of a column.
+fn swatch_style(px: &[(usize, usize)]) -> Option<LineStyle> {
+    if px.is_empty() {
+        return None;
+    }
+    let mut ys: Vec<usize> = px.iter().map(|p| p.1).collect();
+    ys.sort_unstable();
+    let yc = ys[ys.len() / 2];
+    let x0 = px.iter().map(|p| p.0).min()?;
+    let x1 = px.iter().map(|p| p.0).max()?;
+    let mut on = vec![false; x1 - x0 + 1];
+    let mut height = vec![0usize; x1 - x0 + 1];
+    for &(x, y) in px {
+        height[x - x0] += 1;
+        if y.abs_diff(yc) <= 1 {
+            on[x - x0] = true;
+        }
+    }
+    let mut hs: Vec<usize> = height.into_iter().filter(|h| *h > 0).collect();
+    hs.sort_unstable();
+    LineStyle::from_profiles(&[on], hs[hs.len() / 2] as f64, true)
+}
+
+/// The cheapest matching of rows to distinct columns of `cost` (exhaustive:
+/// the legend entries of one colour are few). A row may stay unmatched, at
+/// a cost of `skip`. Returns each row's column.
+fn match_rows(cost: &[Vec<f64>], skip: f64) -> Vec<Option<usize>> {
+    fn go(
+        r: usize,
+        cost: &[Vec<f64>],
+        skip: f64,
+        used: &mut Vec<bool>,
+        cur: &mut Vec<Option<usize>>,
+        acc: f64,
+        best: &mut (f64, Vec<Option<usize>>),
+    ) {
+        if acc >= best.0 {
+            return;
+        }
+        if r == cost.len() {
+            *best = (acc, cur.clone());
+            return;
+        }
+        for c in 0..used.len() {
+            if !used[c] {
+                used[c] = true;
+                cur.push(Some(c));
+                go(r + 1, cost, skip, used, cur, acc + cost[r][c], best);
+                cur.pop();
+                used[c] = false;
+            }
+        }
+        cur.push(None);
+        go(r + 1, cost, skip, used, cur, acc + skip, best);
+        cur.pop();
+    }
+    let n_cols = cost.first().map(|r| r.len()).unwrap_or(0);
+    let mut best = (f64::INFINITY, vec![None; cost.len()]);
+    go(0, cost, skip, &mut vec![false; n_cols], &mut Vec::new(), 0.0, &mut best);
+    best.1
 }
 
 /// Width of the sampling bins of auto-detected curves: about 100 per panel.
@@ -553,11 +784,83 @@ fn text_lines(items: &[TextItem], region: &RectF) -> Vec<RectF> {
     lines.into_iter().filter(|(_, n, w)| *n >= 2 && *w).map(|(l, _, _)| l).collect()
 }
 
+/// Pixels within `r` px (Chebyshev) of a set pixel, inside `region`.
+fn dilate(bits: &[bool], w: usize, region: &RectF, r: usize) -> Vec<bool> {
+    let (rx0, ry0, rx1, ry1) = (region.x0 as usize, region.y0 as usize, region.x1 as usize, region.y1 as usize);
+    // Separable: rows, then columns.
+    let mut rows = vec![false; bits.len()];
+    for y in ry0..ry1 {
+        for x in rx0..rx1 {
+            if bits[y * w + x] {
+                for xx in x.saturating_sub(r).max(rx0)..(x + r + 1).min(rx1) {
+                    rows[y * w + xx] = true;
+                }
+            }
+        }
+    }
+    let mut out = vec![false; bits.len()];
+    for y in ry0..ry1 {
+        for x in rx0..rx1 {
+            if rows[y * w + x] {
+                for yy in y.saturating_sub(r).max(ry0)..(y + r + 1).min(ry1) {
+                    out[yy * w + x] = true;
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Blurred or upscaled strokes have soft edges several pixels wide, and the
+/// shades there can form a colour cluster of their own (dark grey around
+/// black, often with more pixels than the core). Merge a cluster into a
+/// darker one when its colour is one of that cluster's fades to the
+/// background and nearly all its pixels lie right next to it. A lighter
+/// series of the same hue runs on its own, away from the darker one.
+fn merge_edge_shades(clusters: &mut Vec<Cluster>, w: usize, region: &RectF, bg_lab: [f64; 3]) {
+    loop {
+        let mut best: Option<(f64, usize, usize)> = None;
+        for (s, sc) in clusters.iter().enumerate() {
+            if sc.count == 0 {
+                continue;
+            }
+            for (c, cc) in clusters.iter().enumerate() {
+                if c == s || path_dist(sc.lab, &cc.fade) > 8.0 || lab_dist(sc.lab, bg_lab) >= lab_dist(cc.lab, bg_lab) {
+                    continue;
+                }
+                let near = dilate(&cc.bits, w, region, 3);
+                let next_to = sc.bits.iter().zip(&near).filter(|(b, n)| **b && **n).count();
+                let frac = next_to as f64 / sc.count as f64;
+                if frac > 0.85 && best.map(|b| frac > b.0).unwrap_or(true) {
+                    best = Some((frac, s, c));
+                }
+            }
+        }
+        let Some((_, s, c)) = best else { break };
+        let shade = clusters.remove(s);
+        let c = if s < c { c - 1 } else { c };
+        for (b, sb) in clusters[c].bits.iter_mut().zip(&shade.bits) {
+            *b |= *sb;
+        }
+        clusters[c].count += shade.count;
+    }
+}
+
+/// Whether cluster `k`'s colour could be a blend of two of the other plot
+/// colours (or of one and the background): it lies on the sRGB mix of the two.
+fn is_blend_of_others(k: usize, clusters: &[Cluster], bg: [u8; 3]) -> bool {
+    let lab = clusters[k].lab;
+    let others: Vec<[u8; 3]> = clusters.iter().enumerate().filter(|(j, _)| *j != k).map(|(_, c)| c.color).chain([bg]).collect();
+    (0..others.len()).any(|a| (a + 1..others.len()).any(|b| path_dist(lab, &fade_path(others[a], others[b])) < 12.0))
+}
+
 /// Where two curves overlap or cross, their blended pixels can match a third
 /// series' colour (blue over orange reads as olive green). Such fragments
 /// are walled in by the other curves, while a curve's own pieces mostly border
 /// the background: drop components whose outline is mostly other series.
-fn drop_sandwiched(clusters: &mut [Cluster], w: usize, region: &RectF) {
+/// A colour no two others can blend into (black among greys) is never such a
+/// fragment, even where it runs through a bundle of other curves.
+fn drop_sandwiched(clusters: &mut [Cluster], w: usize, region: &RectF, bg: [u8; 3]) {
     let (rx0, ry0, rx1, ry1) = (region.x0 as usize, region.y0 as usize, region.x1 as usize, region.y1 as usize);
     let h = clusters.first().map(|c| c.bits.len() / w).unwrap_or(0);
     let mut owner = vec![u16::MAX; w * h];
@@ -570,7 +873,11 @@ fn drop_sandwiched(clusters: &mut [Cluster], w: usize, region: &RectF) {
             }
         }
     }
+    let blendable: Vec<bool> = (0..clusters.len()).map(|k| is_blend_of_others(k, clusters, bg)).collect();
     for (k, c) in clusters.iter_mut().enumerate() {
+        if !blendable[k] {
+            continue;
+        }
         let (labels, n) = label_components(&c.bits, w, h, true);
         // Per component: outline pixels owned by another series / by none.
         let mut other = vec![0usize; n as usize + 1];
@@ -713,8 +1020,53 @@ fn clean_legend_text(s: &str) -> (String, usize) {
 /// A legend entry: its name (wrapped lines joined) and its swatch pixels.
 struct LegendEntry {
     name: String,
-    /// Lab colours of the swatch: ink that is neither text nor grid grey.
-    swatch: Vec<[f64; 3]>,
+    /// The swatch: ink that is neither text nor grid grey, as (x, y, Lab).
+    swatch: Vec<(usize, usize, [f64; 3])>,
+}
+
+/// Where the text starts in a legend box that also covers the entry's
+/// swatch (OCR boxes sometimes take in the line sample on their left). The
+/// swatch is a thin horizontal stroke, solid, dashed or dotted, whose inked
+/// columns all span the same rows; the first column inked outside those
+/// rows is the text. `None` when the box starts with text.
+fn swatch_end_in_box(mark: &dyn Fn(usize, usize) -> bool, b: &RectF) -> Option<f64> {
+    let (x0, x1) = (b.x0.max(0.0) as usize, b.x1 as usize);
+    let (y0, y1) = (b.y0.max(0.0) as usize, b.y1.ceil() as usize);
+    let th = b.height();
+    let cols: Vec<Option<(usize, usize)>> = (x0..x1)
+        .map(|x| {
+            let top = (y0..y1).find(|&y| mark(x, y))?;
+            let bot = (y0..y1).rev().find(|&y| mark(x, y))?;
+            Some((top, bot))
+        })
+        .collect();
+    let first = cols.iter().position(|c| c.is_some())?;
+    // The stroke's rows: median ends of the first inked columns.
+    let lead: Vec<(usize, usize)> = cols[first..].iter().flatten().take(5).copied().collect();
+    let med = |mut v: Vec<usize>| {
+        v.sort_unstable();
+        v[v.len() / 2]
+    };
+    let (top, bot) = (med(lead.iter().map(|c| c.0).collect()), med(lead.iter().map(|c| c.1).collect()));
+    let mid = (top + bot) as f64 / 2.0 + 0.5;
+    if (bot - top + 1) as f64 > 0.5 * th || (mid - b.center().y).abs() > 0.25 * th {
+        return None;
+    }
+    let (mut full, mut inked) = (0usize, 0usize);
+    for (k, c) in cols.iter().enumerate().skip(first) {
+        let Some((t, bt)) = *c else { continue };
+        if t + 1 < top || bt > bot + 1 {
+            // A line sample at least a text height long, drawn as a stroke
+            // (letters of x-height words cover the rows only in part).
+            let long = (k - first) as f64 >= th;
+            return (long && full as f64 >= 0.7 * inked as f64).then_some((x0 + k) as f64 - 1.0);
+        }
+        inked += 1;
+        if t.abs_diff(top) <= 1 && bt.abs_diff(bot) <= 1 {
+            full += 1;
+        }
+    }
+    None
 }
 
 struct Legend {
@@ -739,37 +1091,62 @@ fn find_legend(img: &RgbaImage, items: &[TextItem], region: &RectF, bg_lab: [f64
     struct Line {
         k: usize,
         name: String,
-        swatch: Vec<[f64; 3]>,
+        swatch: Vec<(usize, usize, [f64; 3])>,
         sw_rect: Option<RectF>,
     }
+    // Swatch ink: neither background nor grid grey.
+    let lab_at = |x: usize, y: usize| {
+        let i = 4 * (y * w + x);
+        let c = [raw[i], raw[i + 1], raw[i + 2]];
+        let l = to_lab(c);
+        (lab_dist(l, bg_lab) > 22.0 && !(chroma(c) < 14.0 && l[0] > 45.0)).then_some(l)
+    };
+    let mark = |x: usize, y: usize| x < w && y < h && lab_at(x, y).is_some();
+    // Typical line height: a word without ascenders or descenders ("mean")
+    // has a short box, but its swatch is as long as the others.
+    let mut heights: Vec<f64> = idx.iter().map(|&k| items[k].bbox.height()).collect();
+    heights.sort_by(f64::total_cmp);
+    let th_ref = heights.get(heights.len() / 2).copied().unwrap_or(0.0);
     let mut lines: Vec<Line> = Vec::new();
     for &k in &idx {
         let it = &items[k];
-        let th = it.bbox.height().max(6.0);
+        let th = it.bbox.height().max(th_ref).max(6.0);
         let (name, lead) = clean_legend_text(&it.text);
-        // Glyphs read from the swatch lie inside the text box: search them too.
+        // Glyphs read from the swatch lie inside the text box: search them
+        // too, and so is a swatch the box takes in without reading it.
         let glyph_w = it.bbox.width() / it.text.chars().count().max(1) as f64;
-        let right = it.bbox.x0 - 1.0 + 0.8 * lead as f64 * glyph_w;
+        let right = (it.bbox.x0 - 1.0 + 0.8 * lead as f64 * glyph_w).max(swatch_end_in_box(&mark, &it.bbox).unwrap_or(f64::MIN));
         let cy = it.bbox.center().y;
         let band = RectF::new(it.bbox.x0 - 4.0 * th, cy - 0.35 * th, right, cy + 0.35 * th).clamp_to(w as f64, h as f64);
         let mut swatch = Vec::new();
-        let mut left = f64::MAX;
-        for y in band.y0 as usize..band.y1.ceil() as usize {
-            for x in band.x0 as usize..band.x1.ceil() as usize {
+        let (bx0, bx1) = (band.x0 as usize, band.x1.ceil() as usize);
+        let rows = band.y0 as usize..band.y1.ceil() as usize;
+        let mut per_col = vec![0usize; bx1.saturating_sub(bx0)];
+        for y in rows.clone() {
+            for x in bx0..bx1 {
                 let p = plot2csv_core::geom::Pt::new(x as f64 + 0.5, y as f64 + 0.5);
                 if others.iter().enumerate().any(|(j, r)| j != k && r.contains(p)) {
                     continue;
                 }
-                let i = 4 * (y * w + x);
-                let c = [raw[i], raw[i + 1], raw[i + 2]];
-                let l = to_lab(c);
-                if lab_dist(l, bg_lab) <= 22.0 || (chroma(c) < 14.0 && l[0] > 45.0) {
-                    continue;
-                }
-                swatch.push(l);
-                left = left.min(x as f64);
+                let Some(l) = lab_at(x, y) else { continue };
+                swatch.push((x, y, l));
+                per_col[x - bx0] += 1;
             }
         }
+        // A thin vertical line across the band (the plot frame, an axis) is
+        // not part of the swatch; a filled patch (bar charts) is wide.
+        let full: Vec<bool> = per_col.iter().map(|n| *n as f64 >= 0.9 * rows.len() as f64).collect();
+        let mut line_col = vec![false; full.len()];
+        let mut x = 0;
+        while x < full.len() {
+            let e = (x..full.len()).find(|&e| !full[e]).unwrap_or(full.len());
+            if e > x && e - x <= 3 {
+                line_col[x..e].fill(true);
+            }
+            x = e + 1;
+        }
+        swatch.retain(|p| !line_col[p.0 - bx0]);
+        let left = swatch.iter().map(|p| p.0 as f64).fold(f64::MAX, f64::min);
         let has = swatch.len() as f64 >= (0.5 * th).max(4.0);
         lines.push(Line {
             k,
@@ -819,9 +1196,17 @@ fn find_legend(img: &RgbaImage, items: &[TextItem], region: &RectF, bg_lab: [f64
         }
         i
     }
+    // Entries whose swatches line up in a column are one block too, though
+    // a word without ascenders or descenders ("mean") has a much shorter box.
+    let aligned = |a: &Line, b: &Line| {
+        let (Some(sa), Some(sb)) = (a.sw_rect, b.sw_rect) else { return false };
+        let (ba, bb) = (items[a.k].bbox, items[b.k].bbox);
+        let hm = ba.height().max(bb.height());
+        (sa.x0 - sb.x0).abs() < hm && ba.y0.max(bb.y0) - ba.y1.min(bb.y1) < 1.2 * hm
+    };
     for a in 0..lines.len() {
         for b in a + 1..lines.len() {
-            if stacked(&items[lines[a].k].bbox, &items[lines[b].k].bbox) {
+            if stacked(&items[lines[a].k].bbox, &items[lines[b].k].bbox) || aligned(&lines[a], &lines[b]) {
                 let (ra, rb) = (root(&mut parent, a), root(&mut parent, b));
                 parent[ra] = rb;
             }
@@ -1103,7 +1488,8 @@ pub fn detect_series(img: &RgbaImage, panel: &Panel, items: &[TextItem], cal: Op
             }
         }
     }
-    drop_sandwiched(&mut clusters, w, &region);
+    merge_edge_shades(&mut clusters, w, &region, bg_lab);
+    drop_sandwiched(&mut clusters, w, &region, bg);
     for c in clusters.iter_mut() {
         c.count = drop_specks(&mut c.bits, w, &region);
     }
@@ -1113,26 +1499,29 @@ pub fn detect_series(img: &RgbaImage, panel: &Panel, items: &[TextItem], cal: Op
     // matches (the same test as the data pixels); a cluster takes the name of
     // the entry with the most votes for it.
     let mut name_votes: Vec<Option<(usize, usize, String)>> = vec![None; clusters.len()];
-    // How many legend entries show each cluster's colour.
-    let mut n_entries = vec![0usize; clusters.len()];
+    // The legend entries that show each cluster's colour, with their swatch's
+    // line style (to tell curves of one colour apart).
+    let mut entries_of: Vec<Vec<(usize, Option<LineStyle>)>> = vec![Vec::new(); clusters.len()];
     for (ei, e) in legend.entries.iter().enumerate() {
         let mut votes = vec![0usize; clusters.len()];
-        for &l in &e.swatch {
+        let mut owner = Vec::with_capacity(e.swatch.len());
+        for &(_, _, l) in &e.swatch {
             let best = clusters.iter().enumerate().map(|(k, c)| (fade_dist(l, c), k)).min_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-            if let Some((d, k)) = best {
-                if d < 0.6 * lab_dist(l, bg_lab) {
-                    votes[k] += 1;
-                }
+            owner.push(best.filter(|(d, _)| *d < 0.6 * lab_dist(l, bg_lab)).map(|(_, k)| k));
+            if let Some(k) = *owner.last().unwrap() {
+                votes[k] += 1;
             }
         }
         let Some((k, &n)) = votes.iter().enumerate().max_by_key(|v| *v.1) else { continue };
         if n >= 3 && n as f64 >= 0.3 * e.swatch.len() as f64 {
-            n_entries[k] += 1;
+            let px: Vec<(usize, usize)> = e.swatch.iter().zip(&owner).filter(|(_, o)| **o == Some(k)).map(|(p, _)| (p.0, p.1)).collect();
+            entries_of[k].push((ei, swatch_style(&px)));
             if !e.name.is_empty() && name_votes[k].as_ref().map(|v| n > v.0).unwrap_or(true) {
                 name_votes[k] = Some((n, ei, e.name.clone()));
             }
         }
     }
+    let n_entries: Vec<usize> = entries_of.iter().map(|e| e.len()).collect();
     // Grey ink lying along grid rows (fragments and crossings the grid
     // removal missed) is grid, not data.
     let near_grid_row = |y: f64| {
@@ -1231,7 +1620,7 @@ pub fn detect_series(img: &RgbaImage, panel: &Panel, items: &[TextItem], cal: Op
             .into_iter()
             .filter(|t| t.span() >= 0.05 * region.width() && t.pts.len() >= 6 && !(greyish && along_grid(t)))
             .collect();
-        let tracks: Vec<Track> = join_disjoint(tracks)
+        let tracks: Vec<Track> = join_disjoint(tracks, max_jump)
             .into_iter()
             .filter(|t| t.span() >= 0.12 * region.width() && t.pts.len() >= 10 && !is_grid_like(t, c.color) && !(greyish && along_grid(t)))
             .collect();
@@ -1247,13 +1636,22 @@ pub fn detect_series(img: &RgbaImage, panel: &Panel, items: &[TextItem], cal: Op
         if tracks.is_empty() && chroma(c.color) < 12.0 && to_lab(c.color)[0] >= 45.0 {
             continue;
         }
+        // A bundle of curves in one colour that the legend does not show
+        // (the individual runs behind a mean and its quantiles): they cross
+        // and bunch up, so most tracks are broken pieces of several curves.
+        if n_entries[ci] == 0 && tracks.len() >= 5 {
+            let mut cov: Vec<f64> = tracks.iter().map(|t| t.coverage()).collect();
+            cov.sort_by(f64::total_cmp);
+            if cov[cov.len() / 2] < 0.85 {
+                notes.push(format!("{}: a bundle of crossing curves not in the legend, left out", color_name(c.color)));
+                continue;
+            }
+        }
         if tracks.len() <= 1 {
             let mut ds = Dataset::new(base_name.clone());
             ds.color = c.color;
-            ds.style = match tracks.first() {
-                Some(t) if t.coverage() < 0.85 => SeriesStyle::Dashed,
-                _ => SeriesStyle::Line,
-            };
+            let solid = tracks.first().map(|t| track_style(t, &c.bits, w, h).map(|s| s.solid()).unwrap_or(t.coverage() >= 0.85));
+            ds.style = if solid == Some(false) { SeriesStyle::Dashed } else { SeriesStyle::Line };
             ds.points = match tracks.first() {
                 Some(t) => sample_track(t, dx, grid_x0),
                 None => averaging_window(&bm, dx, dx),
@@ -1289,19 +1687,68 @@ pub fn detect_series(img: &RgbaImage, panel: &Panel, items: &[TextItem], cal: Op
             notes.push(format!("{}: {} points", ds.name, ds.points.len()));
             datasets.push(ds);
         } else {
-            for (k, t) in tracks.iter().enumerate() {
-                let cov = t.coverage();
-                let style = if cov > 0.85 { SeriesStyle::Line } else { SeriesStyle::Dashed };
-                let word = if cov > 0.85 {
-                    "solid"
-                } else if cov > 0.5 {
-                    "dashed"
-                } else {
-                    "dotted"
+            let styles: Vec<Option<LineStyle>> = tracks.iter().map(|t| track_style(t, &c.bits, w, h)).collect();
+            // Several legend entries in this colour (solid mean, dashed and
+            // dash-dot quantiles): each takes the curve whose dash style is
+            // most like its swatch's. Widths count relative to the widest of
+            // each group (a swatch's measure differs from a curve's), and a
+            // short track (a fragment) is a poor match for an entry.
+            let entries = &entries_of[ci];
+            let mut entry_of = vec![None; tracks.len()];
+            if entries.len() >= 2 {
+                let relative = |s: Vec<Option<LineStyle>>| {
+                    let widest = s.iter().flatten().map(|s| s.width).fold(1.0, f64::max);
+                    s.into_iter().map(|s| s.map(|s| LineStyle { width: s.width / widest, ..s })).collect::<Vec<_>>()
                 };
-                let mut ds = Dataset::new(format!("{} {} ({word})", base_name, k + 1));
+                let e_styles = relative(entries.iter().map(|e| e.1).collect());
+                let t_styles = relative(styles.clone());
+                let longest = tracks.iter().map(|t| t.span()).fold(1.0, f64::max);
+                let cost: Vec<Vec<f64>> = e_styles
+                    .iter()
+                    .map(|es| {
+                        t_styles
+                            .iter()
+                            .zip(&tracks)
+                            .map(|(ts, t)| {
+                                let style = match (es, ts) {
+                                    (Some(a), Some(b)) => a.dist(b),
+                                    _ => 1.0,
+                                };
+                                style + 1.5 * (1.0 - t.span() / longest)
+                            })
+                            .collect()
+                    })
+                    .collect();
+                for (r, t) in match_rows(&cost, 3.0).into_iter().enumerate() {
+                    if let Some(t) = t.filter(|_| !legend.entries[entries[r].0].name.is_empty()) {
+                        entry_of[t] = Some(entries[r].0);
+                    }
+                }
+            }
+            // Unmatched curves are named after their colour, not an entry.
+            // When every entry has its curve, a much shorter leftover is a
+            // piece of one of them (split off where they run together).
+            let base = if entries.len() >= 2 { color_name(c.color).to_string() } else { base_name.clone() };
+            let all_named = entries.len() >= 2 && entry_of.iter().flatten().count() == entries.len();
+            let longest = tracks.iter().map(|t| t.span()).fold(0.0, f64::max);
+            let mut order: Vec<usize> =
+                (0..tracks.len()).filter(|&k| !(all_named && entry_of[k].is_none() && tracks[k].span() < 0.5 * longest)).collect();
+            order.sort_by_key(|&k| entry_of[k].unwrap_or(usize::MAX));
+            let mut n_unnamed = 0;
+            for k in order {
+                let t = &tracks[k];
+                let solid = styles[k].map(|s| s.solid()).unwrap_or(t.coverage() >= 0.85);
+                let word = styles[k].map(|s| s.word()).unwrap_or(if solid { "solid" } else { "dashed" });
+                let name = match entry_of[k] {
+                    Some(e) => legend.entries[e].name.clone(),
+                    None => {
+                        n_unnamed += 1;
+                        format!("{base} {n_unnamed} ({word})")
+                    }
+                };
+                let mut ds = Dataset::new(name);
                 ds.color = c.color;
-                ds.style = style;
+                ds.style = if solid { SeriesStyle::Line } else { SeriesStyle::Dashed };
                 ds.points = sample_track(t, dx, grid_x0);
                 let mut a = auto.clone();
                 a.mask = Some(band_mask(t, w, h, (0.5 * max_jump).max(4.0)));
@@ -1585,6 +2032,175 @@ mod tests {
         assert_eq!(r.datasets.len(), 1, "{}", r.note);
         assert_eq!(r.datasets[0].style, SeriesStyle::Dashed, "{}", r.note);
         assert!(r.datasets[0].points.len() > 20, "{}", r.note);
+    }
+
+    /// Samples of a repeating dash pattern (on, off, on, off, ...) along `n` px.
+    fn pattern(p: &[usize], n: usize) -> Vec<bool> {
+        let period: usize = p.iter().sum();
+        (0..n)
+            .map(|i| {
+                let mut t = i % period;
+                for (k, &len) in p.iter().enumerate() {
+                    if t < len {
+                        return k % 2 == 0;
+                    }
+                    t -= len;
+                }
+                false
+            })
+            .collect()
+    }
+
+    #[test]
+    fn line_style_tells_the_dash_patterns_apart() {
+        let word = |p: &[usize]| LineStyle::from_profiles(&[pattern(p, 400)], 3.0, false).unwrap().word();
+        assert_eq!(word(&[400]), "solid");
+        // One-pixel blanks (grid lines crossing) don't break a solid line.
+        assert_eq!(word(&[40, 1]), "solid");
+        assert_eq!(word(&[15, 6]), "dashed");
+        assert_eq!(word(&[25, 6, 4, 6]), "dash-dot");
+        assert_eq!(word(&[3, 5]), "dotted");
+        // A legend swatch holds a period and a half of dash-dot: a dash and
+        // a dot. Measured whole, the dot counts.
+        let swatch = pattern(&[43, 12, 6, 12], 61);
+        assert!(LineStyle::from_profiles(std::slice::from_ref(&swatch), 7.0, true).unwrap().dots >= 0.5);
+        assert_eq!(LineStyle::from_profiles(&[swatch], 7.0, false).unwrap().dots, 0.0);
+    }
+
+    #[test]
+    fn swatch_inside_a_legend_box_is_found() {
+        // OCR box (100,50)-(300,74): a dashed swatch on rows 61-63 up to
+        // x = 160, then text whose letters span rows 54-70.
+        let ink = |x: usize, y: usize| {
+            let dash = x < 160 && (x - 100) % 18 < 12 && (61..=63).contains(&y);
+            let text = x >= 172 && (x - 172) % 8 < 3 && (54..=70).contains(&y);
+            dash || text
+        };
+        let b = RectF::new(100.0, 50.0, 300.0, 74.0);
+        let end = swatch_end_in_box(&ink, &b).expect("swatch");
+        assert!((165.0..=172.0).contains(&end), "{end}");
+        // A box that starts with x-height letters ("mean value"): stems span
+        // rows 58-68, arches only their top rows; then a tall "l".
+        let word = |x: usize, y: usize| {
+            let k = x.wrapping_sub(100) % 9;
+            let xh = (100..200).contains(&x) && ((k < 2 && (58..=68).contains(&y)) || ((2..6).contains(&k) && (58..=60).contains(&y)));
+            xh || ((200..203).contains(&x) && (50..=68).contains(&y))
+        };
+        assert_eq!(swatch_end_in_box(&word, &RectF::new(100.0, 50.0, 260.0, 76.0)), None);
+    }
+
+    #[test]
+    fn soft_black_edges_join_black_and_keep_it_in_a_grey_bundle() {
+        // An enlarged figure: a black curve (rows 50-53) whose soft edges
+        // (rows 47-49, 54-56) form a dark grey cluster with more pixels than
+        // the black, inside a bundle of light grey curves (rows 40-46, 57-63)
+        // and a separate light grey curve (rows 100-102).
+        let (w, h) = (200usize, 120usize);
+        let region = RectF::new(0.0, 0.0, w as f64, h as f64);
+        let bg = [255, 255, 255];
+        let cluster = |color: [u8; 3], rows: &[std::ops::RangeInclusive<usize>]| {
+            let bits: Vec<bool> = (0..w * h).map(|i| (10..190).contains(&(i % w)) && rows.iter().any(|r| r.contains(&(i / w)))).collect();
+            let count = bits.iter().filter(|b| **b).count();
+            Cluster { color, lab: to_lab(color), fade: fade_path(color, bg), bits, count }
+        };
+        let mut clusters = vec![
+            cluster([189, 189, 189], &[40..=46, 57..=63, 100..=102]),
+            cluster([74, 75, 75], &[47..=49, 54..=56]),
+            cluster([2, 2, 2], &[50..=53]),
+        ];
+        merge_edge_shades(&mut clusters, w, &region, to_lab(bg));
+        let colors: Vec<[u8; 3]> = clusters.iter().map(|c| c.color).collect();
+        assert_eq!(colors, [[189, 189, 189], [2, 2, 2]]);
+        assert_eq!(clusters[1].count, 10 * 180);
+        // Black is walled in by the grey bundle, but no two other colours
+        // blend into black: it is a curve, not a crossing artefact.
+        assert!(!is_blend_of_others(1, &clusters, bg));
+        drop_sandwiched(&mut clusters, w, &region, bg);
+        assert_eq!(clusters[1].count, 10 * 180);
+        // Mid grey between black and white could be a blend.
+        clusters.push(cluster([120, 120, 120], &[110..=111]));
+        assert!(is_blend_of_others(2, &clusters, bg));
+    }
+
+    /// The image blurred with a 3×3 box, `n` times (an enlarged small figure).
+    fn blur(img: &RgbaImage, n: usize) -> RgbaImage {
+        let mut cur = img.clone();
+        for _ in 0..n {
+            let src = cur.clone();
+            let (w, h) = (src.width(), src.height());
+            for y in 1..h - 1 {
+                for x in 1..w - 1 {
+                    let mut s = [0u32; 3];
+                    for dy in 0..3 {
+                        for dx in 0..3 {
+                            let p = src.get_pixel(x + dx - 1, y + dy - 1).0;
+                            (0..3).for_each(|k| s[k] += p[k] as u32);
+                        }
+                    }
+                    cur.put_pixel(x, y, Rgba([(s[0] / 9) as u8, (s[1] / 9) as u8, (s[2] / 9) as u8, 255]));
+                }
+            }
+        }
+        cur
+    }
+
+    /// A curve drawn with a dash pattern (on, off, ...) along x, `thick` px.
+    fn draw_pattern(img: &mut RgbaImage, f: impl Fn(f64) -> f64, x0: u32, x1: u32, p: &[usize], thick: u32) {
+        let on = pattern(p, (x1 - x0) as usize);
+        for x in x0..x1 {
+            if on[(x - x0) as usize] {
+                for t in 0..thick {
+                    img.put_pixel(x, f(x as f64) as u32 + t, Rgba([0, 0, 0, 255]));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn black_curves_in_a_grey_bundle_take_their_legend_names() {
+        // A hazard-curve style figure, enlarged and soft: a tangle of light
+        // grey curves the legend does not show, and black mean (thick solid),
+        // dashed and dash-dot curves, named by the legend. The black strokes'
+        // soft edges form a dark grey cluster of their own, and inside the
+        // bundle each black curve is walled in by grey.
+        let mut img = RgbaImage::from_pixel(700, 500, Rgba([255, 255, 255, 255]));
+        let inner = RectF::new(50.0, 30.0, 670.0, 470.0);
+        for k in 0..12 {
+            let (a, b) = (110.0 + 22.0 * k as f64, 0.9 + 0.13 * k as f64);
+            draw_curve(&mut img, |x| a + 45.0 * (x / 70.0 + b).sin(), 60, 660, [160, 160, 160], None, 3);
+        }
+        let mean = |x: f64| 150.0 + 0.4 * (x - 60.0);
+        let q95 = |x: f64| 110.0 + 0.4 * (x - 60.0);
+        let q05 = |x: f64| 200.0 + 0.4 * (x - 60.0);
+        draw_curve(&mut img, mean, 60, 660, [0, 0, 0], None, 4);
+        draw_pattern(&mut img, q95, 60, 660, &[14, 7], 3);
+        draw_pattern(&mut img, q05, 60, 660, &[24, 7, 4, 7], 3);
+        // The legend box, bottom right of the bundle.
+        for y in 380..462 {
+            for x in 470..666 {
+                img.put_pixel(x, y, Rgba([255, 255, 255, 255]));
+            }
+        }
+        draw_curve(&mut img, |_| 392.0, 480, 530, [0, 0, 0], None, 4);
+        draw_pattern(&mut img, |_| 418.0, 480, 530, &[14, 7], 3);
+        draw_pattern(&mut img, |_| 444.0, 480, 530, &[24, 7, 4, 7], 3);
+        let img = blur(&img, 2);
+        let items = vec![
+            text(RectF::new(540.0, 386.0, 580.0, 400.0), "mean", TextRole::Legend),
+            text(RectF::new(540.0, 410.0, 640.0, 428.0), "Quantile 0.95", TextRole::Legend),
+            text(RectF::new(540.0, 436.0, 640.0, 454.0), "Quantile 0.05", TextRole::Legend),
+        ];
+        let r = detect_series(&img, &panel(inner), &items, None);
+        let names: Vec<&str> = r.datasets.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, ["mean", "Quantile 0.95", "Quantile 0.05"], "{}", r.note);
+        assert!(r.note.contains("left out"), "{}", r.note);
+        for (d, (f, t)) in r.datasets.iter().zip([(&mean as &dyn Fn(f64) -> f64, 4.0), (&q95, 3.0), (&q05, 3.0)]) {
+            let on = d.points.iter().filter(|p| (p.y - f(p.x) - 0.5 * t).abs() < 4.0).count();
+            assert!(on as f64 > 0.9 * d.points.len() as f64, "{}: {on} of {} points on the curve", d.name, d.points.len());
+            // The lowest one runs into the legend box at x = 505.
+            let (lo, hi) = (d.points.first().unwrap().x, d.points.last().unwrap().x);
+            assert!(lo < 70.0 && hi > 495.0, "{} spans {lo}..{hi}", d.name);
+        }
     }
 
     #[test]

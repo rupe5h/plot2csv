@@ -36,10 +36,10 @@ and automatic re-runs; loading an image or project starts a new history.
 |---|---|---|
 | ① Import | — | load (file, drag-and-drop, Ctrl+V), optional photo enhancement |
 | ② Correct | rotation and perspective, from the vanishing points of the long line families | drag the 4 corners, rotate slider, 90° turns, output size, preview |
-| ③ Plot area | framed boxes and L-shaped axes, multi-panel figures, outer box with labels, bar-chart guess | add, delete, resize panels; plot type per panel |
+| ③ Plot area | framed boxes and L-shaped axes (not the dark edge strips of a screenshot), multi-panel figures, outer box with labels, bar-chart guess | add, delete, resize panels; plot type per panel |
 | ④ Text | indra OCR of each panel, a rotated pass for Y titles, tick-guided OCR for missed labels, role classification | role, text, value per item (double-click a box to correct its text in place); read text in a drawn box; re-read |
 | ⑤ Axes | tick/grid detection plus RANSAC fit of the labels: linear, log (incl. OCR'd superscripts `10°`, `102`), dates | WPD-style calibration points (drag, arrow-nudge) and values; all axis types |
-| ⑥ Data | colour clustering with grid-line removal; markers (blob centroids); lines (multi-curve tracking that separates same-colour solid/dashed/dotted curves through crossings, and joins a spiky curve the legend shows once), all sampled on one X grid per panel; bars with category labels (the X-tick row, never the axis title); legend names (wrapped entries joined) in legend order | WPD manual tools (add/adjust/delete, Q/W, arrows) and automatic tools (mask box/pen/erase, shown by default — the pen takes the colour of the curve it paints over, colour picker, dominant colours, distance, Averaging Window, X Step (± interpolation), Blob, Bar, Multi-track); the colour test leaves out pixels that better match another plot colour (grid, other series) |
+| ⑥ Data | colour clustering with grid-line removal; markers (blob centroids); lines (multi-curve tracking that separates same-colour solid/dashed/dash-dot/dotted curves through crossings, and joins a spiky curve the legend shows once), all sampled on one X grid per panel; bars with category labels (the X-tick row, never the axis title); legend names (wrapped entries joined) in legend order, matched by dash style when several entries share a colour (a black mean and its dashed and dash-dot quantiles); soft edges of enlarged images kept with their curve; a bundle of crossing curves the legend doesn't show is left out | WPD manual tools (add/adjust/delete, Q/W, arrows) and automatic tools (mask box/pen/erase, shown by default — the pen takes the colour of the curve it paints over, colour picker, dominant colours, distance, Averaging Window, X Step (± interpolation), Blob, Bar, Multi-track); the colour test leaves out pixels that better match another plot colour (grid, other series) |
 | ⑦ Export | — | Acquired Data view of one series (sort raw/X/Y/nearest-neighbour) or all series side by side (bar charts: always, one row per category), number format, separator; axis titles as column headers; CSV, long/wide CSV, ZIP, project JSON |
 
 Plot types: 2D X-Y (linear, log, dates), bar charts, polar, ternary, map with scale
@@ -84,11 +84,14 @@ truth, normalised by the axis range. It also runs with `EVAL_VERBOSE=1`, which
 dumps the text items, and `EVAL_DUMP=dir`, which writes overlay images. A
 fixture also fails if extra series are found, or if a series' name differs from
 its `legend` entry in the JSON. Current results: every fixture passes, with
-median errors of 0.05–0.7 %. The fixtures are a clean chart, a photographed
+median errors of 0.04–0.7 %. The fixtures are a clean chart, a photographed
 chart, log axes with superscripts, markers, bars, same-colour
-solid/dashed/dotted curves, a two-panel figure, and a spreadsheet-style
+solid/dashed/dotted curves, a two-panel figure, a spreadsheet-style
 response spectrum (log grid whose lines darken where they cross, title and
-two-line legend inside the frame, spiky curves that cross).
+two-line legend inside the frame, spiky curves that cross), and a grayscale
+log-log hazard plot enlarged from a small figure (black mean, dashed and
+dash-dot quantiles running through a bundle of light grey curves the shade
+of the grid, framed legend, dark screenshot edges).
 
 ## Layout
 

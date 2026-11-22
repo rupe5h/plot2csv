@@ -97,12 +97,20 @@ pub fn detect_panels(src: &GrayImage) -> RegionResult {
     // So is one around a single large candidate inset on all four sides (an
     // Excel chart-area border, a figure frame): its margin holds the tick
     // labels. Grid-line strips of a real frame share its sides, so they don't
-    // count, and insets and legend boxes are too small.
+    // count, and insets and legend boxes are too small. An L-shape only has
+    // its left and bottom sides: a frame inset from those two is the plot,
+    // and the L is a border (dark edge strips of a screenshot).
     cands.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
     let contains = |a: &RectF, b: &RectF| b.intersect(a).map(|r| r.area() / b.area().max(1e-9)).unwrap_or(0.0) > 0.9;
     let min_inset = (0.008 * w.max(h)).max(4.0);
-    let inset_in =
-        |outer: &RectF, d: &RectF| [d.x0 - outer.x0, d.y0 - outer.y0, outer.x1 - d.x1, outer.y1 - d.y1].iter().all(|m| *m > min_inset);
+    let inset_in = |outer: &PanelGuess, d: &PanelGuess| {
+        let (o, i) = (&outer.inner, &d.inner);
+        let m = [i.x0 - o.x0, i.y0 - o.y0, o.x1 - i.x1, o.y1 - i.y1];
+        match outer.shape {
+            "axes" => d.shape == "frame" && m[0] > min_inset && m[3] > min_inset,
+            _ => m.iter().all(|m| *m > min_inset),
+        }
+    };
     let mut accepted: Vec<PanelGuess> = Vec::new();
     for (i, c) in cands.iter().enumerate() {
         let inside: Vec<&PanelGuess> =
@@ -116,7 +124,7 @@ pub fn detect_panels(src: &GrayImage) -> RegionResult {
         if disjoint >= 2 {
             continue;
         }
-        if inside.iter().any(|d| d.inner.area() > 0.35 * c.inner.area() && inset_in(&c.inner, &d.inner)) {
+        if inside.iter().any(|d| d.inner.area() > 0.35 * c.inner.area() && inset_in(c, d)) {
             continue;
         }
         let overlaps = accepted.iter().any(|a| a.inner.iou(&c.inner) > 0.1 || contains(&a.inner, &c.inner) || contains(&c.inner, &a.inner));
@@ -324,6 +332,31 @@ mod tests {
         let p = &r.panels[0];
         assert!((p.inner.x0 - 90.0).abs() < 4.0 && (p.inner.y0 - 15.0).abs() < 4.0, "{:?}", p.inner);
         assert!((p.inner.x1 - 680.0).abs() < 4.0 && (p.inner.y1 - 420.0).abs() < 4.0, "{:?}", p.inner);
+    }
+
+    #[test]
+    fn screenshot_edge_strips_are_not_axes() {
+        // A screenshot of a framed plot with a dark strip down the left edge
+        // and a dark row along the bottom: the strips meet like L-shaped
+        // axes around the whole image (their outer sides are off the image,
+        // so they pass as drawn lines), and the frame's top is too close to
+        // the image top for it to count as inset on all four sides.
+        let (w, h) = (1790, 1446);
+        let mut g = GrayImage::from_pixel(w, h, Luma([255]));
+        for y in 0..h {
+            for x in 0..4 {
+                g.put_pixel(x, y, Luma([14]));
+            }
+        }
+        for x in 0..w {
+            g.put_pixel(x, h - 1, Luma([14]));
+        }
+        draw_axes(&mut g, 288, 12, 1738, 1290, true);
+        let r = detect_panels(&g);
+        assert_eq!(r.panels.len(), 1, "{}", r.note);
+        let p = &r.panels[0];
+        assert!((p.inner.x0 - 288.0).abs() < 6.0 && (p.inner.y0 - 12.0).abs() < 6.0, "{:?}", p.inner);
+        assert!((p.inner.x1 - 1738.0).abs() < 6.0 && (p.inner.y1 - 1290.0).abs() < 6.0, "{:?}", p.inner);
     }
 
     #[test]

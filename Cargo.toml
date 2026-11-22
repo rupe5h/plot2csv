@@ -27,8 +27,15 @@ lto = true
 codegen-units = 1
 panic = "abort"
 
+# Lean dev builds: full DWARF is most of target/'s size. Line tables keep file:line in
+# panics/backtraces; for lldb variable inspection of our crates, set debug = true here.
+[profile.dev]
+debug = "line-tables-only"
+
+# Dependencies are optimized, so their debug info is of little use; drop it entirely.
 [profile.dev.package."*"]
 opt-level = 2
+debug = false
 
 # Native tools/benchmarks: LTO breaks linking onnxruntime's CoreML objects on macOS.
 [profile.eval]

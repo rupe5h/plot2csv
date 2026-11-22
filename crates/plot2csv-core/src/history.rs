@@ -50,12 +50,13 @@ fn snapshot(p: &Project) -> Project {
         regions: p.regions.clone(),
         panels: p.panels.clone(),
         active_panel: p.active_panel,
+        fine_tune: p.fine_tune.clone(),
     }
 }
 
 /// Everything in a project except the source image and the selection.
 fn content_view(p: &Project) -> impl PartialEq + serde::Serialize + '_ {
-    let Project { version, source: _, import, correction, regions, panels, active_panel: _ } = p;
+    let Project { version, source: _, import, correction, regions, panels, active_panel: _, fine_tune } = p;
     let panels: Vec<_> = panels
         .iter()
         .map(|w| {
@@ -63,7 +64,7 @@ fn content_view(p: &Project) -> impl PartialEq + serde::Serialize + '_ {
             (panel_id, text, axes, evidence, data, measurements)
         })
         .collect();
-    (version, import, correction, regions, panels)
+    (version, import, correction, regions, panels, fine_tune)
 }
 
 /// Same content (ignoring source and selection)? A difference reported by `==`

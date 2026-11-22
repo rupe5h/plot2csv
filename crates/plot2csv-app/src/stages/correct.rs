@@ -43,6 +43,7 @@ impl Plot2CsvApp {
         let det = plot2csv_vision::correct::detect_correction(&gray);
         let note = det.note.clone();
         self.project.correction.propose(det.correction, note);
+        self.project.fine_tune = None;
         self.correct_ui = CorrectUi::default();
         self.correct_ui.rotation = ((det.rotation_deg * 10.0).round() / 10.0) as f32;
     }

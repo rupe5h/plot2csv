@@ -169,6 +169,95 @@ impl Correction {
         std::mem::swap(&mut self.out_w, &mut self.out_h);
         self.enabled = true;
     }
+
+    /// The axis-aligned rectangle a fine-tune turns `quad` (TL, TR, BR, BL)
+    /// into: same centre, mean side lengths. Fails unless the corners form a
+    /// convex shape in that order.
+    pub fn fine_tune_target(quad: &[Pt; 4]) -> Result<RectF, String> {
+        let convex = (0..4).all(|i| {
+            let (a, b, c) = (quad[i], quad[(i + 1) % 4], quad[(i + 2) % 4]);
+            b.sub(a).cross(c.sub(b)) > 0.0
+        });
+        if !convex {
+            return Err("The corners must form a convex shape in the order TL, TR, BR, BL.".into());
+        }
+        let w = (quad[0].dist(quad[1]) + quad[3].dist(quad[2])) / 2.0;
+        let h = (quad[0].dist(quad[3]) + quad[1].dist(quad[2])) / 2.0;
+        if w < 8.0 || h < 8.0 {
+            return Err("The corners are too close together.".into());
+        }
+        let c = quad.iter().fold(Pt::default(), |a, p| a.add(*p)).scale(0.25);
+        Ok(RectF::new(c.x - w / 2.0, c.y - h / 2.0, c.x + w / 2.0, c.y + h / 2.0))
+    }
+
+    /// How far (px) the farthest corner of `quad` is from its fine-tune target.
+    pub fn fine_tune_shift(quad: &[Pt; 4]) -> Result<f64, String> {
+        let target = Self::fine_tune_target(quad)?;
+        Ok(quad.iter().zip(target.corners()).map(|(a, b)| a.dist(b)).fold(0.0, f64::max))
+    }
+
+    /// Correct further so that `quad` (TL, TR, BR, BL in the current corrected
+    /// image) becomes an axis-aligned rectangle. The new correction still maps
+    /// straight from the source image (no second resampling). `src_w × src_h`
+    /// is the source size (the corrected image when correction is off).
+    pub fn fine_tuned(&self, quad: &[Pt; 4], src_w: u32, src_h: u32) -> Result<FineTuned, String> {
+        let target = Self::fine_tune_target(quad)?;
+        let (old, ow, oh) = if self.enabled {
+            (self.homography(), self.out_w as f64, self.out_h as f64)
+        } else {
+            (Homography::identity(), src_w as f64, src_h as f64)
+        };
+        let fix = Homography::fit(quad, &target.corners()).ok_or("Could not fit a perspective to these corners.")?;
+        // The whole current image must stay on the same side of the new vanishing line.
+        let side = fix.w(target.center()).signum();
+        let image = RectF::new(0.0, 0.0, ow, oh);
+        if image.corners().iter().any(|p| fix.w(*p) * side <= 0.0) {
+            return Err("These corners ask for a stronger perspective change than the image allows.".into());
+        }
+        // New output: the re-corrected image plus the target, within a margin of the old frame.
+        let margin = 0.1 * ow.max(oh);
+        let limit = image.union(&target).expand(margin);
+        let frame = fix.apply_rect(&image).union(&target).intersect(&limit).ok_or("The corners lie outside the image.")?;
+        let (nw, nh) = (frame.width().round().max(16.0), frame.height().round().max(16.0));
+        if nw > 8000.0 || nh > 8000.0 {
+            return Err("The corrected image would be too large.".into());
+        }
+        let shift = Homography::translation(-frame.x0, -frame.y0);
+        let map = fix.then(&shift);
+        let to_source = old.then(&map).inverse().ok_or("Could not invert the new correction.")?;
+        let out = RectF::new(0.0, 0.0, nw, nh).corners();
+        let side = to_source.w(Pt::new(nw / 2.0, nh / 2.0)).signum();
+        if out.iter().any(|p| to_source.w(*p) * side <= 0.0) {
+            return Err("These corners ask for a stronger perspective change than the image allows.".into());
+        }
+        let correction = Correction {
+            enabled: true,
+            quad: out.map(|p| to_source.apply(p)),
+            out_w: nw as u32,
+            out_h: nh as u32,
+            method: "plot area fine-tune".into(),
+            confidence: self.confidence,
+        };
+        Ok(FineTuned { correction, map, rect: shift.apply_rect(&target) })
+    }
+}
+
+/// Result of [`Correction::fine_tuned`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct FineTuned {
+    pub correction: Correction,
+    /// Old corrected px -> new corrected px.
+    pub map: Homography,
+    /// Where the fine-tune corners land: an axis-aligned rectangle (new corrected px).
+    pub rect: RectF,
+}
+
+/// Corners of a panel's data area being placed for a perspective fine-tune
+/// (Plot area stage), not yet applied. Corrected px, order TL, TR, BR, BL.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FineTune {
+    pub panel: u32,
+    pub quad: [Pt; 4],
 }
 
 /// One plot inside the (corrected) image.
@@ -339,6 +428,9 @@ pub struct Project {
     pub regions: StageState<Vec<Panel>>,
     pub panels: Vec<PanelWork>,
     pub active_panel: Option<u32>,
+    /// A perspective fine-tune being set up in the Plot area stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fine_tune: Option<FineTune>,
 }
 
 impl Default for Project {
@@ -351,6 +443,7 @@ impl Default for Project {
             regions: StageState::default(),
             panels: Vec::new(),
             active_panel: None,
+            fine_tune: None,
         }
     }
 }
@@ -468,6 +561,32 @@ impl Project {
     pub fn next_panel_id(&self) -> u32 {
         self.panel_list().iter().map(|p| p.id + 1).max().unwrap_or(1)
     }
+
+    /// Apply the pending fine-tune: correct the perspective again so that its
+    /// corners become the panel's (rectangular) data area. The panels move with
+    /// the image; text, axes and data become stale. `src_w × src_h` is the
+    /// source image size. Returns how far (px) the farthest corner moved.
+    pub fn apply_fine_tune(&mut self, src_w: u32, src_h: u32) -> Result<f64, String> {
+        let ft = self.fine_tune.clone().ok_or("No fine-tune in progress.")?;
+        let corr = self.correction.value.clone().unwrap_or_else(|| Correction::identity(src_w, src_h));
+        let r = corr.fine_tuned(&ft.quad, src_w, src_h)?;
+        let moved = Correction::fine_tune_shift(&ft.quad)?;
+        let (w, h) = (r.correction.out_w as f64, r.correction.out_h as f64);
+        for list in [self.regions.value.as_mut(), self.regions.auto.as_mut()].into_iter().flatten() {
+            for p in list.iter_mut() {
+                p.inner = r.map.apply_rect(&p.inner).clamp_to(w, h);
+                p.outer = r.map.apply_rect(&p.outer).clamp_to(w, h);
+            }
+        }
+        if let Some(p) = self.regions.value.iter_mut().flatten().find(|p| p.id == ft.panel) {
+            p.inner = r.rect.clamp_to(w, h);
+            p.outer = p.outer.union(&p.inner);
+        }
+        self.correction.value = Some(r.correction);
+        self.fine_tune = None;
+        self.invalidate_after(Stage::Region);
+        Ok(moved)
+    }
 }
 
 trait MaxWith {
@@ -528,6 +647,124 @@ mod tests {
         let s = p.to_json();
         let q = Project::from_json(&s).unwrap();
         assert_eq!(p, q);
+    }
+
+    fn close(a: Pt, b: Pt, tol: f64) -> bool {
+        a.dist(b) < tol
+    }
+
+    #[test]
+    fn fine_tune_target_checks_the_corners() {
+        let rect = RectF::new(10.0, 20.0, 110.0, 70.0);
+        let t = Correction::fine_tune_target(&rect.corners()).unwrap();
+        assert!(close(Pt::new(t.x0, t.y0), Pt::new(10.0, 20.0), 1e-9) && close(Pt::new(t.x1, t.y1), Pt::new(110.0, 70.0), 1e-9));
+        assert_eq!(Correction::fine_tune_shift(&rect.corners()).unwrap(), 0.0);
+        let [a, b, c, d] = rect.corners();
+        assert!(Correction::fine_tune_target(&[a, c, b, d]).is_err(), "crossed");
+        assert!(Correction::fine_tune_target(&[a, d, c, b]).is_err(), "counter-clockwise");
+        assert!(Correction::fine_tune_target(&[a, a.add(Pt::new(5.0, 0.0)), a.add(Pt::new(5.0, 5.0)), a.add(Pt::new(0.0, 5.0))]).is_err());
+    }
+
+    /// Source points whose corrected positions are the fine-tune corners land
+    /// on the corners of an axis-aligned rectangle after the fine-tune.
+    fn check_fine_tune(corr: &Correction, src: (u32, u32), quad: [Pt; 4]) -> FineTuned {
+        let r = corr.fine_tuned(&quad, src.0, src.1).unwrap();
+        let old = if corr.enabled { corr.homography() } else { Homography::identity() };
+        let old_inv = old.inverse().unwrap();
+        let new = r.correction.homography();
+        for (q, c) in quad.iter().zip(r.rect.corners()) {
+            let p = new.apply(old_inv.apply(*q));
+            assert!(close(p, c, 1e-6), "{p:?} vs {c:?}");
+            assert!(close(r.map.apply(*q), c, 1e-6));
+        }
+        let t = Correction::fine_tune_target(&quad).unwrap();
+        assert!((r.rect.width() - t.width()).abs() < 1e-9 && (r.rect.height() - t.height()).abs() < 1e-9);
+        r
+    }
+
+    #[test]
+    fn fine_tune_from_an_uncorrected_image() {
+        let corr = Correction::identity(600, 400);
+        // A frame that is a little narrower at the top.
+        let quad = [Pt::new(104.0, 50.0), Pt::new(496.0, 52.0), Pt::new(510.0, 351.0), Pt::new(90.0, 349.0)];
+        let r = check_fine_tune(&corr, (600, 400), quad);
+        assert!(r.correction.enabled);
+        assert_eq!(r.correction.method, "plot area fine-tune");
+        assert!(r.correction.out_w.abs_diff(600) < 40 && r.correction.out_h.abs_diff(400) < 40, "{:?}", r.correction);
+    }
+
+    #[test]
+    fn fine_tune_composes_with_the_existing_correction() {
+        let mut corr = Correction::identity(800, 600);
+        corr.enabled = true;
+        corr.quad = [Pt::new(30.0, 10.0), Pt::new(780.0, 40.0), Pt::new(760.0, 590.0), Pt::new(10.0, 570.0)];
+        corr.out_w = 760;
+        corr.out_h = 560;
+        let quad = [Pt::new(80.0, 40.0), Pt::new(700.0, 44.0), Pt::new(703.0, 500.0), Pt::new(78.0, 497.0)];
+        check_fine_tune(&corr, (800, 600), quad);
+    }
+
+    #[test]
+    fn rectangular_corners_keep_the_correction() {
+        let mut corr = Correction::identity(800, 600);
+        corr.enabled = true;
+        corr.quad = [Pt::new(30.0, 10.0), Pt::new(780.0, 40.0), Pt::new(760.0, 590.0), Pt::new(10.0, 570.0)];
+        corr.out_w = 760;
+        corr.out_h = 560;
+        let r = check_fine_tune(&corr, (800, 600), RectF::new(50.0, 60.0, 700.0, 500.0).corners());
+        assert_eq!((r.correction.out_w, r.correction.out_h), (760, 560));
+        for (a, b) in r.correction.quad.iter().zip(&corr.quad) {
+            assert!(close(*a, *b, 1e-6), "{a:?} vs {b:?}");
+        }
+    }
+
+    #[test]
+    fn extreme_fine_tune_is_refused() {
+        let corr = Correction::identity(600, 400);
+        // Top edge squeezed to a few px: the vanishing line crosses the image.
+        let quad = [Pt::new(298.0, 50.0), Pt::new(302.0, 50.0), Pt::new(590.0, 390.0), Pt::new(10.0, 390.0)];
+        assert!(corr.fine_tuned(&quad, 600, 400).is_err());
+    }
+
+    #[test]
+    fn apply_fine_tune_moves_panels_and_marks_later_stages_stale() {
+        let mut p = Project::default();
+        p.correction.propose(Correction::identity(600, 400), "");
+        p.correction.approve();
+        let panel = |id: u32, inner: RectF| Panel {
+            id,
+            name: format!("Plot {id}"),
+            kind: AxesKind::Xy,
+            inner,
+            outer: inner.expand(20.0),
+            enabled: true,
+        };
+        p.regions.propose(vec![panel(1, RectF::new(100.0, 50.0, 500.0, 350.0)), panel(2, RectF::new(520.0, 50.0, 590.0, 120.0))], "");
+        p.sync_panels();
+        p.work_mut(1).text.propose(vec![], "");
+        let quad = [Pt::new(104.0, 50.0), Pt::new(496.0, 52.0), Pt::new(510.0, 351.0), Pt::new(90.0, 349.0)];
+        p.fine_tune = Some(FineTune { panel: 1, quad });
+        let moved = p.apply_fine_tune(600, 400).unwrap();
+        assert!(moved > 5.0 && moved < 15.0, "{moved}");
+        assert!(p.fine_tune.is_none());
+        let c = p.correction.value.clone().unwrap();
+        assert_eq!(p.correction.status, StageStatus::Approved);
+        let (w, h) = (c.out_w as f64, c.out_h as f64);
+        let r = c.homography();
+        let p1 = p.panel(1).unwrap();
+        for (q, corner) in quad.iter().zip(p1.inner.corners()) {
+            assert!(close(r.apply(*q), corner, 1e-6));
+        }
+        assert!(p1.outer.contains(Pt::new(p1.inner.x0, p1.inner.y0)) && p1.outer.contains(Pt::new(p1.inner.x1, p1.inner.y1)));
+        let moved2 = r.apply_rect(&RectF::new(520.0, 50.0, 590.0, 120.0)).clamp_to(w, h);
+        let same = |a: &RectF| {
+            close(Pt::new(a.x0, a.y0), Pt::new(moved2.x0, moved2.y0), 1e-6)
+                && close(Pt::new(a.x1, a.y1), Pt::new(moved2.x1, moved2.y1), 1e-6)
+        };
+        assert!(same(&p.panel(2).unwrap().inner), "{:?} vs {moved2:?}", p.panel(2).unwrap().inner);
+        assert!(same(&p.regions.auto.as_ref().unwrap()[1].inner), "the auto proposal moves too");
+        assert_eq!(p.work(1).unwrap().text.status, StageStatus::Stale);
+        assert!(p.apply_fine_tune(600, 400).is_err(), "nothing pending");
     }
 
     #[test]

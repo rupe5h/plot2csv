@@ -1,10 +1,15 @@
 //! ③ Plot area: one or more panels with an inner (data) box and an outer (labels) box.
+//!
+//! "Fine-tune perspective" frees the four corners of a panel's data area. The
+//! user drags them onto the plot frame; Apply corrects the perspective again
+//! (from the source image) so that they form a rectangle.
 
 use egui::{Color32, CursorIcon, Pos2, Rect, Stroke, StrokeKind};
 use plot2csv_core::axes::AxesKind;
-use plot2csv_core::geom::RectF;
-use plot2csv_core::project::{Panel, Stage};
+use plot2csv_core::geom::{Homography, Pt, RectF};
+use plot2csv_core::project::{Correction, FineTune, Panel, Stage};
 
+use super::{arrow_nudge, pos, pt};
 use crate::app::Plot2CsvApp;
 use crate::canvas::CanvasView;
 use crate::icons::{self, Icon};
@@ -36,6 +41,11 @@ pub struct RegionUi {
     pub drawing: bool,
     draw_start: Option<Pos2>,
     draw_cur: Option<Pos2>,
+    /// Fine-tune corner being dragged, and the one the arrow keys nudge (TL, TR, BR, BL).
+    corner_drag: Option<usize>,
+    corner_sel: Option<usize>,
+    /// Magnifier centre: the fine-tune corner being moved.
+    pub focus: Option<Pos2>,
 }
 
 impl RegionUi {
@@ -45,7 +55,54 @@ impl RegionUi {
         self.drag = None;
         self.draw_start = None;
         self.draw_cur = None;
+        self.clear_corner();
     }
+
+    fn clear_corner(&mut self) {
+        self.corner_drag = None;
+        self.corner_sel = None;
+        self.focus = None;
+    }
+}
+
+#[derive(Clone, Copy)]
+enum FineAction {
+    Start(u32),
+    Apply,
+    Cancel,
+}
+
+const CORNER_NAMES: [&str; 4] = ["TL", "TR", "BR", "BL"];
+/// Pick radius (screen px) of a fine-tune corner.
+const CORNER_PICK: f32 = 14.0;
+
+/// Sidebar controls while a fine-tune is being set up.
+fn fine_tune_controls(ui: &mut egui::Ui, quad: &[Pt; 4]) -> Option<FineAction> {
+    ui.label(egui::RichText::new("Fine-tune perspective").strong());
+    ui.label(
+        egui::RichText::new(
+            "Drag the TL, TR, BR and BL points onto the corners of the plot frame. Click a point to nudge it with the arrow keys (Shift ×10, Alt ×¼).",
+        )
+        .weak(),
+    );
+    let shift = Correction::fine_tune_shift(quad);
+    match &shift {
+        Ok(d) => ui.label(egui::RichText::new(format!("The corners are up to {d:.1} px off a rectangle.")).small()),
+        Err(e) => ui.label(egui::RichText::new(e).color(widgets::WARN)),
+    };
+    let mut act = None;
+    ui.horizontal(|ui| {
+        if widgets::primary_button_icon(ui, Icon::CircleCheck, "Apply", shift.is_ok())
+            .on_hover_text("Correct the perspective again so that these corners form a rectangle")
+            .clicked()
+        {
+            act = Some(FineAction::Apply);
+        }
+        if ui.button((icons::image(ui, Icon::Xmark), "Cancel")).on_hover_text("Keep the current correction (Esc)").clicked() {
+            act = Some(FineAction::Cancel);
+        }
+    });
+    act
 }
 
 pub fn to_rect(r: &RectF) -> Rect {
@@ -122,6 +179,7 @@ pub const PANEL_COLOR: Color32 = Color32::from_rgb(0, 140, 255);
 impl Plot2CsvApp {
     pub fn auto_regions(&mut self, _ctx: &egui::Context) {
         let Some(g) = self.imgs.corrected_gray.clone() else { return };
+        self.project.fine_tune = None;
         let res = plot2csv_vision::regions::detect_panels(&g);
         let panels: Vec<Panel> = res
             .panels
@@ -138,6 +196,37 @@ impl Plot2CsvApp {
             .collect();
         self.region_ui = RegionUi { selected: panels.first().map(|p| p.id), ..Default::default() };
         self.project.regions.propose(panels, res.note);
+    }
+
+    fn fine_tune_action(&mut self, act: FineAction) {
+        self.region_ui.clear_corner();
+        match act {
+            FineAction::Start(id) => {
+                let Some(p) = self.project.panel(id) else { return };
+                self.project.fine_tune = Some(FineTune { panel: id, quad: p.inner.corners() });
+                self.region_ui.drawing = false;
+                self.region_ui.selected = Some(id);
+                self.status = "Drag the four corners onto the corners of the plot frame, then press Apply.".into();
+            }
+            FineAction::Cancel => {
+                self.project.fine_tune = None;
+                self.status = "Fine-tune cancelled.".into();
+            }
+            FineAction::Apply => {
+                let Some(src) = &self.imgs.source else { return };
+                match self.project.apply_fine_tune(src.width(), src.height()) {
+                    Ok(moved) => {
+                        self.edited(Stage::Region);
+                        self.status = format!("Perspective fine-tuned: the corners moved up to {moved:.1} px.");
+                        self.defer("Applying correction…", |app, ctx| {
+                            app.imgs.sync_corrected(ctx, &app.project);
+                            app.data_ui.invalidate_caches();
+                        });
+                    }
+                    Err(e) => self.status = e,
+                }
+            }
+        }
     }
 
     fn panels_mut(&mut self) -> &mut Vec<Panel> {
@@ -160,6 +249,8 @@ impl Plot2CsvApp {
         let mut delete = None;
         let selected = self.region_ui.selected;
         let mut new_sel = selected;
+        let fine = self.project.fine_tune.clone();
+        let mut fine_act = None;
         let panels = self.panels_mut();
         for p in panels.iter_mut() {
             let sel = selected == Some(p.id);
@@ -188,6 +279,10 @@ impl Plot2CsvApp {
                             }
                         });
                     });
+                    if let Some(f) = fine.as_ref().filter(|f| f.panel == p.id) {
+                        fine_act = fine_tune_controls(ui, &f.quad).or(fine_act);
+                        return;
+                    }
                     if sel {
                         ui.label(
                             egui::RichText::new(format!(
@@ -198,6 +293,16 @@ impl Plot2CsvApp {
                             .weak(),
                         );
                     }
+                    if fine.is_none()
+                        && ui
+                            .button("Fine-tune perspective")
+                            .on_hover_text(
+                                "Move the blue box's corners freely onto the plot frame, then straighten the image again from them",
+                            )
+                            .clicked()
+                    {
+                        fine_act = Some(FineAction::Start(p.id));
+                    }
                 });
         }
         if let Some(id) = delete {
@@ -206,8 +311,14 @@ impl Plot2CsvApp {
             if new_sel == Some(id) {
                 new_sel = None;
             }
+            if self.project.fine_tune.as_ref().is_some_and(|f| f.panel == id) {
+                self.project.fine_tune = None;
+            }
         }
         self.region_ui.selected = new_sel;
+        if let Some(act) = fine_act {
+            self.fine_tune_action(act);
+        }
         ui.add_space(4.0);
         let draw_label = if self.region_ui.drawing {
             egui::Atoms::new("Drawing… (drag on the image)")
@@ -216,6 +327,9 @@ impl Plot2CsvApp {
         };
         if ui.selectable_label(self.region_ui.drawing, draw_label).clicked() {
             self.region_ui.drawing = !self.region_ui.drawing;
+            if self.region_ui.drawing && self.project.fine_tune.is_some() {
+                self.fine_tune_action(FineAction::Cancel);
+            }
         }
         if ui.button("Use the whole image as one plot").clicked() {
             let (w, h) = (self.imgs.corrected_size().x as f64, self.imgs.corrected_size().y as f64);
@@ -229,6 +343,7 @@ impl Plot2CsvApp {
                 enabled: true,
             };
             *self.panels_mut() = vec![p];
+            self.project.fine_tune = None;
             self.region_ui.selected = Some(id);
             changed = true;
         }
@@ -240,6 +355,7 @@ impl Plot2CsvApp {
     pub fn region_canvas(&mut self, ui: &mut egui::Ui, view: &CanvasView, interactive: bool) {
         let painter = ui.painter_at(view.rect);
         let panels = self.project.panel_list().to_vec();
+        let fine = self.project.fine_tune.clone();
         for p in &panels {
             let outer = view.rect_to_screen(to_rect(&p.outer));
             let inner = view.rect_to_screen(to_rect(&p.inner));
@@ -252,6 +368,10 @@ impl Plot2CsvApp {
             );
             painter.extend(dash);
             let col = Color32::from_rgba_unmultiplied(PANEL_COLOR.r(), PANEL_COLOR.g(), PANEL_COLOR.b(), alpha);
+            if let Some(f) = fine.as_ref().filter(|f| f.panel == p.id) {
+                self.paint_fine_tune(&painter, view, f, &format!("{} · fine-tune", p.name));
+                continue;
+            }
             painter.rect_filled(inner, 0.0, Color32::from_rgba_unmultiplied(0, 140, 255, if p.enabled { 18 } else { 6 }));
             painter.rect_stroke(inner, 0.0, Stroke::new(2.0, col), StrokeKind::Middle);
             widgets::label_box(
@@ -274,6 +394,10 @@ impl Plot2CsvApp {
             painter.rect_stroke(r, 0.0, Stroke::new(2.0, PANEL_COLOR), StrokeKind::Middle);
         }
         if !interactive {
+            return;
+        }
+        if self.project.fine_tune.is_some() {
+            self.fine_tune_canvas(ui.ctx(), view);
             return;
         }
         let resp = &view.response;
@@ -372,6 +496,79 @@ impl Plot2CsvApp {
                 let ip = view.to_image(p);
                 self.region_ui.selected = panels.iter().find(|q| q.inner.contains(super::pt(ip))).map(|q| q.id).or(self.region_ui.selected);
             }
+        }
+    }
+
+    /// The fine-tune corners, their edges and the grid of the rectangle they will become.
+    fn paint_fine_tune(&self, painter: &egui::Painter, view: &CanvasView, f: &FineTune, label: &str) {
+        let screen = |p: Pt| view.to_screen(pos(p));
+        let sq = f.quad.map(screen);
+        if let Some((t, h)) = Correction::fine_tune_target(&f.quad).ok().and_then(|t| Some((t, Homography::fit(&t.corners(), &f.quad)?))) {
+            let grid = Stroke::new(1.0, Color32::from_rgba_unmultiplied(0, 160, 255, 90));
+            for i in 1..10 {
+                let k = i as f64 / 10.0;
+                let (x, y) = (t.x0 + t.width() * k, t.y0 + t.height() * k);
+                painter.line_segment([screen(h.apply(Pt::new(x, t.y0))), screen(h.apply(Pt::new(x, t.y1)))], grid);
+                painter.line_segment([screen(h.apply(Pt::new(t.x0, y))), screen(h.apply(Pt::new(t.x1, y)))], grid);
+            }
+        }
+        for i in 0..4 {
+            painter.line_segment([sq[i], sq[(i + 1) % 4]], Stroke::new(2.0, PANEL_COLOR));
+        }
+        widgets::label_box(painter, sq[0] + egui::vec2(10.0, 10.0), egui::Align2::LEFT_TOP, label, PANEL_COLOR);
+        for (i, s) in sq.iter().enumerate() {
+            widgets::marker(painter, *s, PANEL_COLOR, 6.0, Some(CORNER_NAMES[i]), self.region_ui.corner_sel == Some(i));
+        }
+    }
+
+    /// Drag, select and nudge the fine-tune corners; Esc cancels.
+    fn fine_tune_canvas(&mut self, ctx: &egui::Context, view: &CanvasView) {
+        let Some(quad) = self.project.fine_tune.as_ref().map(|f| f.quad) else { return };
+        let sq = quad.map(|p| view.to_screen(pos(p)));
+        let corner_at = |s: Pos2| {
+            sq.iter()
+                .enumerate()
+                .map(|(i, c)| (i, c.distance(s)))
+                .filter(|(_, d)| *d < CORNER_PICK)
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(i, _)| i)
+        };
+        let r = &view.response;
+        let ui_state = &mut self.region_ui;
+        if ui_state.corner_drag.is_some() {
+            view.set_cursor(CursorIcon::Grabbing);
+        } else if r.hover_pos().and_then(corner_at).is_some() {
+            view.set_cursor(CursorIcon::Grab);
+        }
+        if r.drag_started_by(egui::PointerButton::Primary) {
+            let origin = ctx.input(|i| i.pointer.press_origin()).or(r.interact_pointer_pos());
+            ui_state.corner_drag = origin.and_then(corner_at);
+            ui_state.corner_sel = ui_state.corner_drag.or(ui_state.corner_sel);
+        }
+        let mut moved = None;
+        if let (Some(i), true) = (ui_state.corner_drag, r.dragged_by(egui::PointerButton::Primary)) {
+            moved = r.interact_pointer_pos().map(|p| (i, pt(view.to_image(p))));
+        }
+        if r.drag_stopped() {
+            ui_state.corner_drag = None;
+        }
+        if r.clicked() {
+            ui_state.corner_sel = r.interact_pointer_pos().and_then(corner_at);
+        }
+        if let (Some(i), Some(d)) = (ui_state.corner_sel, arrow_nudge(ctx)) {
+            moved = Some((i, quad[i].add(Pt::new(d.x as f64, d.y as f64))));
+        }
+        if let Some((i, p)) = moved {
+            ui_state.focus = Some(pos(p));
+            if let Some(f) = self.project.fine_tune.as_mut() {
+                f.quad[i] = p;
+            }
+        }
+        if view.hover.is_some() && self.region_ui.corner_drag.is_none() {
+            self.region_ui.focus = None;
+        }
+        if !ctx.egui_wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.fine_tune_action(FineAction::Cancel);
         }
     }
 }

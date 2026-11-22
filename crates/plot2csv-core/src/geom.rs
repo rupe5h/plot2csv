@@ -85,6 +85,13 @@ impl RectF {
     pub fn clamp_to(&self, w: f64, h: f64) -> Self {
         RectF::new(self.x0.clamp(0.0, w), self.y0.clamp(0.0, h), self.x1.clamp(0.0, w), self.y1.clamp(0.0, h))
     }
+    pub fn union(&self, o: &RectF) -> RectF {
+        RectF { x0: self.x0.min(o.x0), y0: self.y0.min(o.y0), x1: self.x1.max(o.x1), y1: self.y1.max(o.y1) }
+    }
+    /// Corners in the order TL, TR, BR, BL.
+    pub fn corners(&self) -> [Pt; 4] {
+        [Pt::new(self.x0, self.y0), Pt::new(self.x1, self.y0), Pt::new(self.x1, self.y1), Pt::new(self.x0, self.y1)]
+    }
 }
 
 /// A projective transform `p' ~ H p`.
@@ -124,6 +131,24 @@ impl Homography {
         let w = m[2][0] * p.x + m[2][1] * p.y + m[2][2];
         let w = if w.abs() < 1e-12 { 1e-12 } else { w };
         Pt::new((m[0][0] * p.x + m[0][1] * p.y + m[0][2]) / w, (m[1][0] * p.x + m[1][1] * p.y + m[1][2]) / w)
+    }
+
+    /// The homogeneous scale of `p`'s image. Its sign tells which side of the
+    /// vanishing line `p` is on: points on opposite sides do not map to one
+    /// connected picture.
+    pub fn w(&self, p: Pt) -> f64 {
+        self.m[2][0] * p.x + self.m[2][1] * p.y + self.m[2][2]
+    }
+
+    /// Bounding box of the image of `r` (its four corners).
+    pub fn apply_rect(&self, r: &RectF) -> RectF {
+        let c = r.corners().map(|p| self.apply(p));
+        RectF::new(
+            c.iter().map(|p| p.x).fold(f64::MAX, f64::min),
+            c.iter().map(|p| p.y).fold(f64::MAX, f64::min),
+            c.iter().map(|p| p.x).fold(f64::MIN, f64::max),
+            c.iter().map(|p| p.y).fold(f64::MIN, f64::max),
+        )
     }
 
     pub fn inverse(&self) -> Option<Self> {

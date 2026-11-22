@@ -44,6 +44,7 @@ fn tip(stage: Stage) -> StageTip {
                 "Blue box: the data area inside the axes. Grey dashed box: the same area plus tick labels and titles.",
                 "Drag the box edges to fit. Use {plus} Draw a new plot area for extra panels.",
                 "Set each panel's Type, and untick any panel you don't want to digitize.",
+                "Frame still skewed? Select the panel and press Fine-tune perspective, drag its four corners onto the frame's corners, then Apply.",
             ],
         },
         Stage::Text => StageTip {

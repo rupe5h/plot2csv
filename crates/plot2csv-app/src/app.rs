@@ -312,6 +312,8 @@ impl Plot2CsvApp {
                 if p.correction.status == StageStatus::Approved {
                     p.correction.status = StageStatus::Proposed;
                 }
+                // Fine-tune corners were placed on the old corrected image.
+                p.fine_tune = None;
             }
             Stage::Region => {
                 if p.regions.status == StageStatus::Approved {
@@ -363,7 +365,11 @@ impl Plot2CsvApp {
             Stage::Correct => p.correction.value.is_none().then(|| "Waiting for the correction proposal.".into()),
             Stage::Region => {
                 let n = p.panel_list().iter().filter(|q| q.enabled).count();
-                (n == 0).then(|| "Add at least one plot area.".into())
+                if p.fine_tune.is_some() {
+                    Some("Apply or cancel the perspective fine-tune first.".into())
+                } else {
+                    (n == 0).then(|| "Add at least one plot area.".into())
+                }
             }
             Stage::Text => p.active_work().and_then(|w| w.text.value.as_ref()).is_none().then(|| "Waiting for OCR.".into()),
             Stage::Axes => match p.active_work().and_then(|w| w.axes.value.as_ref()) {
@@ -735,10 +741,14 @@ impl Plot2CsvApp {
     fn reset_stage_to_auto(&mut self) {
         let p = &mut self.project;
         match self.stage {
-            Stage::Correct => p.correction.reset_to_auto(),
+            Stage::Correct => {
+                p.correction.reset_to_auto();
+                p.fine_tune = None;
+            }
             Stage::Region => {
                 p.regions.reset_to_auto();
                 p.sync_panels();
+                p.fine_tune = None;
             }
             Stage::Text | Stage::Axes | Stage::Data => {
                 if let Some(id) = p.active_panel {
@@ -831,6 +841,7 @@ impl Plot2CsvApp {
             Stage::Axes => self.axes_ui.focus,
             Stage::Data => self.data_ui.focus,
             Stage::Correct => self.correct_ui.focus,
+            Stage::Region => self.region_ui.focus,
             _ => None,
         }
     }

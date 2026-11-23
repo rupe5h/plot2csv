@@ -668,9 +668,16 @@ impl Plot2CsvApp {
                 });
             });
         }
-        let footer_h = 96.0;
-        let avail = ui.available_height() - footer_h;
-        egui::ScrollArea::vertical().max_height(avail.max(100.0)).auto_shrink([false, false]).show(ui, |ui| match self.stage {
+        // Footer: approve / re-run / reset, pinned to the bottom at the height it needs;
+        // the stage's tools scroll in the space above it.
+        if self.stage != Stage::Export {
+            let margin = egui::Margin { top: 6, bottom: 4, ..Default::default() };
+            egui::Panel::bottom("side_footer")
+                .resizable(false)
+                .frame(egui::Frame::new().inner_margin(margin))
+                .show(ui, |ui| self.sidebar_footer(ui, ctx));
+        }
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match self.stage {
             Stage::Import => self.import_sidebar(ui, ctx),
             Stage::Correct => self.correct_sidebar(ui, ctx),
             Stage::Region => self.region_sidebar(ui, ctx),
@@ -679,44 +686,41 @@ impl Plot2CsvApp {
             Stage::Data => self.data_sidebar(ui, ctx),
             Stage::Export => self.export_sidebar(ui, ctx),
         });
-        // Footer: approve / re-run / reset
-        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-            ui.add_space(4.0);
-            if self.stage != Stage::Export {
-                let blocker = self.approve_blocker();
-                let approved = self.project.status(self.stage) == StageStatus::Approved;
-                let label = if approved { "Continue" } else { "Approve & continue" };
-                let r = widgets::primary_button_trailing(ui, label, Icon::ChevronRight, blocker.is_none() && !self.is_busy());
-                if let Some(b) = &blocker {
-                    r.clone().on_disabled_hover_text(b.clone());
-                }
-                if r.clicked() {
-                    self.approve_current(ctx);
-                }
-                ui.horizontal(|ui| {
-                    let has_auto = !matches!(self.stage, Stage::Import);
-                    if has_auto
-                        && ui
-                            .add_enabled(!self.is_busy(), egui::Button::new((icons::image(ui, Icon::ArrowsRotate), "Re-run auto")))
-                            .on_hover_text("Discard edits and run the automatic step again")
-                            .clicked()
-                    {
-                        self.run_auto(ctx, self.stage);
-                    }
-                    if has_auto
-                        && ui
-                            .button((icons::image(ui, Icon::RotateLeft), "Reset to auto"))
-                            .on_hover_text("Restore the last automatic proposal")
-                            .clicked()
-                    {
-                        self.reset_stage_to_auto();
-                    }
-                });
-                if let Some(b) = blocker {
-                    ui.label(egui::RichText::new(b).small().color(widgets::WARN));
-                }
+    }
+
+    fn sidebar_footer(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let blocker = self.approve_blocker();
+        if let Some(b) = &blocker {
+            ui.label(egui::RichText::new(b).small().color(widgets::WARN));
+        }
+        ui.horizontal(|ui| {
+            let has_auto = !matches!(self.stage, Stage::Import);
+            if has_auto
+                && ui
+                    .add_enabled(!self.is_busy(), egui::Button::new((icons::image(ui, Icon::ArrowsRotate), "Re-run auto")))
+                    .on_hover_text("Discard edits and run the automatic step again")
+                    .clicked()
+            {
+                self.run_auto(ctx, self.stage);
+            }
+            if has_auto
+                && ui
+                    .button((icons::image(ui, Icon::RotateLeft), "Reset to auto"))
+                    .on_hover_text("Restore the last automatic proposal")
+                    .clicked()
+            {
+                self.reset_stage_to_auto();
             }
         });
+        let approved = self.project.status(self.stage) == StageStatus::Approved;
+        let label = if approved { "Continue" } else { "Approve & continue" };
+        let r = widgets::primary_button_trailing(ui, label, Icon::ChevronRight, blocker.is_none() && !self.is_busy());
+        if let Some(b) = blocker {
+            r.clone().on_disabled_hover_text(b);
+        }
+        if r.clicked() {
+            self.approve_current(ctx);
+        }
     }
 
     fn keep_stale_edits(&mut self) {

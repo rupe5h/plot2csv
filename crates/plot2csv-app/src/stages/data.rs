@@ -372,7 +372,12 @@ impl Plot2CsvApp {
         widgets::section(ui, "⑥ Data series");
         if let Some(w) = self.project.active_work() {
             if !w.data.note.is_empty() {
-                ui.label(egui::RichText::new(&w.data.note).color(widgets::INFO));
+                // The per-series counts repeat the list below: show them on hover only.
+                let (summary, details) = note_summary(&w.data.note);
+                let r = ui.label(egui::RichText::new(summary).color(widgets::INFO));
+                if details.is_some() {
+                    r.on_hover_text(&w.data.note);
+                }
             }
         }
         if self.active_calibration().is_none() {
@@ -414,39 +419,47 @@ impl Plot2CsvApp {
         let mut updates: Vec<(usize, Dataset)> = Vec::new();
         for (i, d) in dss.iter().enumerate() {
             let mut d2 = d.clone();
+            // Colour | name (the highlighted one is active) ... count, shown, delete (right-aligned).
             ui.horizontal(|ui| {
-                if ui.radio(i == active, "").clicked() {
-                    new_active = Some(i);
-                }
                 let mut col = egui::Color32::from_rgb(d.color[0], d.color[1], d.color[2]);
-                if egui::color_picker::color_edit_button_srgba(ui, &mut col, egui::color_picker::Alpha::Opaque).changed() {
-                    d2.color = [col.r(), col.g(), col.b()];
-                }
-                match &mut self.data_ui.rename {
-                    Some((ri, name)) if *ri == i => {
-                        let r = ui.add(egui::TextEdit::singleline(name).desired_width(110.0));
-                        if r.lost_focus() {
-                            d2.name = name.clone();
-                            self.data_ui.rename = None;
-                        } else {
-                            r.request_focus();
-                        }
+                ui.scope(|ui| {
+                    ui.spacing_mut().interact_size.x = ui.spacing().interact_size.y;
+                    if egui::color_picker::color_edit_button_srgba(ui, &mut col, egui::color_picker::Alpha::Opaque)
+                        .on_hover_text("Series colour")
+                        .changed()
+                    {
+                        d2.color = [col.r(), col.g(), col.b()];
                     }
-                    _ => {
-                        let r = ui.selectable_label(i == active, &d.name).on_hover_text("Double-click to rename");
-                        if r.clicked() {
-                            new_active = Some(i);
-                        }
-                        if r.double_clicked() {
-                            self.data_ui.rename = Some((i, d.name.clone()));
-                        }
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button(icons::image(ui, Icon::TrashCan)).on_hover_text("Delete dataset").clicked() {
+                        delete = Some(i);
                     }
-                }
-                ui.label(egui::RichText::new(format!("{}", d.points.len())).weak());
-                ui.checkbox(&mut d2.visible, "").on_hover_text("Show on image");
-                if ui.small_button(icons::image(ui, Icon::TrashCan)).on_hover_text("Delete dataset").clicked() {
-                    delete = Some(i);
-                }
+                    ui.checkbox(&mut d2.visible, "").on_hover_text("Show on image");
+                    ui.label(egui::RichText::new(format!("{}", d.points.len())).weak()).on_hover_text("Points");
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| match &mut self.data_ui.rename {
+                        Some((ri, name)) if *ri == i => {
+                            let r = ui.add(egui::TextEdit::singleline(name).desired_width(f32::INFINITY));
+                            if r.lost_focus() {
+                                d2.name = name.clone();
+                                self.data_ui.rename = None;
+                            } else {
+                                r.request_focus();
+                            }
+                        }
+                        _ => {
+                            let r = ui
+                                .add(egui::Button::selectable(i == active, &d.name).truncate())
+                                .on_hover_text(format!("{}\nClick to select, double-click to rename", d.name));
+                            if r.clicked() {
+                                new_active = Some(i);
+                            }
+                            if r.double_clicked() {
+                                self.data_ui.rename = Some((i, d.name.clone()));
+                            }
+                        }
+                    });
+                });
             });
             if d2 != *d {
                 updates.push((i, d2));
@@ -520,10 +533,16 @@ impl Plot2CsvApp {
             return;
         };
         let before = ds.auto.clone();
-        // --- Mask
-        egui::Grid::new("auto_grid").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-            ui.label(egui::RichText::new("Mask").strong());
-            ui.horizontal_wrapped(|ui| {
+        let dom = self.dominant_colors();
+        let (dx_def, step_def) = (10.0, self.default_xstep());
+        ui.add_space(4.0);
+        // One grid for every setting so the labels and the controls line up. No row may wrap:
+        // a grid sizes its rows from the previous frame, so a wrapped row overlaps the next one.
+        egui::Grid::new("auto_grid").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+            // --- Mask
+            ui.label("Mask");
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
                 for (t, label, tip) in [
                     (Tool::MaskBox, "Box", "Drag a box to include an area"),
                     (Tool::MaskPen, "Pen", "Paint over the curve: the dataset takes the curve's colour if it has another one"),
@@ -534,9 +553,10 @@ impl Plot2CsvApp {
                         self.data_ui.show_mask = true;
                     }
                 }
-                ui.toggle_value(&mut self.data_ui.show_mask, (icons::image(ui, Icon::Eye), "View"))
+                ui.add_space(4.0);
+                ui.toggle_value(&mut self.data_ui.show_mask, icons::image(ui, Icon::Eye))
                     .on_hover_text("Show the selected dataset's mask (yellow)");
-                if ui.small_button("Erase All").clicked() {
+                if ui.button(icons::image(ui, Icon::TrashCan)).on_hover_text("Erase the whole mask").clicked() {
                     ds.auto.mask = None;
                     self.data_ui.mask = None;
                 }
@@ -548,16 +568,18 @@ impl Plot2CsvApp {
                 ui.end_row();
             }
             // --- Colour
-            ui.label(egui::RichText::new("Color").strong());
+            ui.label("Color");
             ui.horizontal(|ui| {
                 egui::ComboBox::from_id_salt("cmode")
                     .selected_text(match ds.auto.color_mode {
-                        ColorMode::Foreground => "Foreground Color",
-                        ColorMode::Background => "Background Color",
+                        ColorMode::Foreground => "Foreground",
+                        ColorMode::Background => "Background",
                     })
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut ds.auto.color_mode, ColorMode::Foreground, "Foreground Color");
-                        ui.selectable_value(&mut ds.auto.color_mode, ColorMode::Background, "Background Color");
+                        ui.selectable_value(&mut ds.auto.color_mode, ColorMode::Foreground, "Foreground")
+                            .on_hover_text("Pixels close to this colour are data");
+                        ui.selectable_value(&mut ds.auto.color_mode, ColorMode::Background, "Background")
+                            .on_hover_text("Pixels far from this colour are data");
                     });
                 let c = if ds.auto.color_mode == ColorMode::Foreground { ds.auto.fg } else { ds.auto.bg };
                 if widgets::swatch(ui, c, 20.0).on_hover_text("Click to change the colour").clicked() {
@@ -573,9 +595,30 @@ impl Plot2CsvApp {
                 }
             });
             ui.end_row();
+            // Dominant colours: one-click picks for the colour above, as many as fit on one line.
+            if !dom.is_empty() {
+                ui.label("");
+                ui.horizontal(|ui| {
+                    let (size, gap) = (16.0, 4.0);
+                    ui.spacing_mut().item_spacing.x = gap;
+                    let fit = ((ui.available_width() + gap) / (size + gap)).floor().max(1.0) as usize;
+                    for c in dom.iter().take(fit.min(10)) {
+                        let tip = format!("Dominant colour RGB {:?}: click to use it", c.color);
+                        if widgets::swatch(ui, c.color, size).on_hover_text(tip).clicked() {
+                            if ds.auto.color_mode == ColorMode::Foreground {
+                                ds.auto.fg = c.color;
+                            } else {
+                                ds.auto.bg = c.color;
+                            }
+                        }
+                    }
+                });
+                ui.end_row();
+            }
             ui.label("Distance");
             ui.horizontal(|ui| {
-                ui.add(egui::DragValue::new(&mut ds.auto.distance).range(1.0..=442.0).speed(1.0));
+                ui.add(egui::DragValue::new(&mut ds.auto.distance).range(1.0..=442.0).speed(1.0))
+                    .on_hover_text("How far a pixel's colour may be from the colour above (RGB distance)");
                 if ui.toggle_value(&mut self.data_ui.show_filter, "Filter Colors").on_hover_text("Show which pixels match").clicked()
                     && self.data_ui.show_filter
                 {
@@ -583,26 +626,8 @@ impl Plot2CsvApp {
                 }
             });
             ui.end_row();
-        });
-        // Dominant colours
-        let dom = self.dominant_colors();
-        ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new("Dominant:").small());
-            for c in dom.iter().take(10) {
-                if widgets::swatch(ui, c.color, 16.0).on_hover_text(format!("RGB {:?}", c.color)).clicked() {
-                    if ds.auto.color_mode == ColorMode::Foreground {
-                        ds.auto.fg = c.color;
-                    } else {
-                        ds.auto.bg = c.color;
-                    }
-                }
-            }
-        });
-        // --- Algorithm
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Algorithm").strong());
-            let (dx_def, step_def) = (10.0, self.default_xstep());
+            // --- Algorithm
+            ui.label("Algorithm");
             egui::ComboBox::from_id_salt("alg").selected_text(ds.auto.algorithm.label()).width(170.0).show_ui(ui, |ui| {
                 ui.label(egui::RichText::new("Generic").weak());
                 let opts: Vec<Algorithm> = vec![
@@ -637,8 +662,10 @@ impl Plot2CsvApp {
                     ds.auto.algorithm = o;
                 }
             });
+            ui.end_row();
+            algorithm_params(ui, &mut ds.auto.algorithm);
         });
-        algorithm_params(ui, &mut ds.auto.algorithm);
+        ui.add_space(6.0);
         ui.horizontal(|ui| {
             if widgets::primary_button(ui, "Run", true).clicked() {
                 if before != ds.auto {
@@ -1021,15 +1048,33 @@ fn paint_stroke(bits: &mut [bool], w: usize, h: usize, stroke: &[Pos2], r: f32, 
     }
 }
 
-/// Parameter fields for the selected algorithm.
+/// The first sentence of a detection note, and the rest if it has more.
+/// Details that are not plain counts (e.g. curves left out) stay in the summary.
+fn note_summary(note: &str) -> (String, Option<&str>) {
+    let Some((head, rest)) = note.split_once(" — ") else { return (note.to_string(), None) };
+    let rest = rest.trim_end_matches('.');
+    let is_count = |s: &str| {
+        s.rsplit_once(": ").is_some_and(|(_, n)| {
+            n.split_once(' ').is_some_and(|(k, unit)| k.parse::<usize>().is_ok() && matches!(unit, "points" | "markers" | "bars"))
+        })
+    };
+    let extra: Vec<&str> = rest.split("; ").filter(|s| !is_count(s)).collect();
+    let summary = if extra.is_empty() { format!("{head}.") } else { format!("{head}. {}.", extra.join("; ")) };
+    (summary, Some(rest))
+}
+
+/// Rows of the settings grid for the chosen algorithm: label | value unit.
 fn algorithm_params(ui: &mut egui::Ui, alg: &mut Algorithm) {
     let num = |ui: &mut egui::Ui, label: &str, v: &mut f64, unit: &str, speed: f64| {
         ui.label(label);
-        ui.add(egui::DragValue::new(v).speed(speed).max_decimals(6));
-        ui.label(egui::RichText::new(unit).weak());
+        ui.horizontal(|ui| {
+            // Pixel sizes need no more than two decimals; axis units may be tiny.
+            ui.add(egui::DragValue::new(v).speed(speed).max_decimals(if unit == "Px" { 2 } else { 6 }));
+            ui.label(egui::RichText::new(unit).weak());
+        });
         ui.end_row();
     };
-    egui::Grid::new("alg_params").num_columns(3).show(ui, |ui| match alg {
+    match alg {
         Algorithm::AveragingWindow { dx, dy } => {
             num(ui, "ΔX", dx, "Px", 0.5);
             num(ui, "ΔY", dy, "Px", 0.5);
@@ -1062,5 +1107,20 @@ fn algorithm_params(ui: &mut egui::Ui, alg: &mut Algorithm) {
             num(ui, "Max jump", max_jump, "Px", 0.5);
             num(ui, "Max gap", max_gap, "Px", 0.5);
         }
-    });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::note_summary;
+
+    #[test]
+    fn note_summary_hides_counts_but_keeps_other_details() {
+        let n = "Found 2 series — Red: 89 points; Blue: 12 markers.";
+        assert_eq!(note_summary(n), ("Found 2 series.".to_string(), Some("Red: 89 points; Blue: 12 markers")));
+        let n = "Found 1 series — Red: 89 points; Grey: a bundle of crossing curves not in the legend, left out.";
+        assert_eq!(note_summary(n).0, "Found 1 series. Grey: a bundle of crossing curves not in the legend, left out.");
+        let n = "No series found automatically; add points by hand or adjust the colour settings.";
+        assert_eq!(note_summary(n), (n.to_string(), None));
+    }
 }
